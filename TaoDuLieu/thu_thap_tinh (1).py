@@ -11,7 +11,7 @@ os.environ['GLOG_minloglevel'] = '2'
 
 def chay_thu_thap():
     print("\n--- BƯỚC 1: THU THẬP DỮ LIỆU TỰ ĐỘNG ---")
-    csv_file = '../KhoDuLieu/dataset_tinh.csv'
+    csv_file = 'dataset_tinh.csv'
 
     # Tạo file CSV với 64 cột (1 Nhãn + 63 Tọa độ)
     if not os.path.exists(csv_file):
@@ -91,8 +91,15 @@ def chay_thu_thap():
                 base_y = hand_landmarks.landmark[0].y
                 base_z = hand_landmarks.landmark[0].z
 
+                toa_do_tam_thoi = []
                 for lm in hand_landmarks.landmark:
-                    toa_do_phang.extend([lm.x - base_x, lm.y - base_y, lm.z - base_z])
+                    toa_do_tam_thoi.extend([lm.x - base_x, lm.y - base_y, lm.z - base_z])
+
+                # CHUẨN HÓA TỈ LỆ (Mới thêm)
+                max_value = max(list(map(abs, toa_do_tam_thoi)))
+                if max_value == 0: max_value = 1.0  # Tránh lỗi chia cho 0
+
+                toa_do_phang = [x / max_value for x in toa_do_tam_thoi]
 
         # Vẽ giao diện
         cv2.rectangle(frame, (10, 10), (620, 110), (0, 0, 0), cv2.FILLED)
