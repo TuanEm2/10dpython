@@ -77,49 +77,34 @@ class QuanLyHoSo:
         if conn:
             cursor = conn.cursor()
             cursor.execute('''CREATE TABLE IF NOT EXISTS NguoiDung
-            (
-                id
-                INT
-                AUTO_INCREMENT
-                PRIMARY
-                KEY,
-                username
-                VARCHAR
-                              (
-                255
-                              ) UNIQUE, password VARCHAR
-                              (
-                                  255
-                              ), ten_hien_thi VARCHAR
-                              (
-                                  255
-                              ), diem_cao_nhat INT DEFAULT 0, so_lan_choi_game INT DEFAULT 0)''')
-            cursor.execute('''CREATE TABLE IF NOT EXISTS TienDoHocTap
-            (
-                id
-                INT
-                AUTO_INCREMENT
-                PRIMARY
-                KEY,
-                user_id
-                INT,
-                ten_bai_hoc
-                VARCHAR
-                              (
-                255
-                              ), UNIQUE KEY uq_user_bai
-                              (
-                                  user_id,
-                                  ten_bai_hoc
-                              ))''')
+            (id INT AUTO_INCREMENT PRIMARY KEY, username VARCHAR(255) UNIQUE, password VARCHAR(255), 
+             ten_hien_thi VARCHAR(255), diem_cao_nhat INT DEFAULT 0, so_lan_choi_game INT DEFAULT 0)''')
 
-            # Khởi tạo hoặc lấy ID của tài khoản Khách CỦA RIÊNG MÁY TÍNH NÀY
+            # Lệnh bọc Try-Except để tự động thêm cột thoi_gian_hoc và avatar nếu chưa có
+            try:
+                cursor.execute("ALTER TABLE NguoiDung ADD COLUMN thoi_gian_hoc FLOAT DEFAULT 0.0")
+            except:
+                pass
+
+            try:
+                cursor.execute("ALTER TABLE NguoiDung ADD COLUMN avatar VARCHAR(50) DEFAULT '🧑‍🚀'")
+            except:
+                pass
+
+            cursor.execute('''CREATE TABLE IF NOT EXISTS TienDoHocTap
+            (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT, ten_bai_hoc VARCHAR(255), 
+             UNIQUE KEY uq_user_bai (user_id, ten_bai_hoc))''')
+
+            # TẠO BẢNG THỐNG KÊ LỖI SAI MỚI
+            cursor.execute('''CREATE TABLE IF NOT EXISTS ThongKeLoiSai
+            (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT, tu_sai VARCHAR(255), so_lan_sai INT DEFAULT 1,
+             FOREIGN KEY (user_id) REFERENCES NguoiDung(id) ON DELETE CASCADE,
+             UNIQUE KEY uq_user_tu (user_id, tu_sai))''')
+
             cursor.execute("SELECT id FROM NguoiDung WHERE username=%s", (self.username_guest,))
             row = cursor.fetchone()
             if not row:
-                cursor.execute(
-                    "INSERT INTO NguoiDung (username, password, ten_hien_thi) VALUES (%s, '', 'Khách Vãng Lai')",
-                    (self.username_guest,))
+                cursor.execute("INSERT INTO NguoiDung (username, password, ten_hien_thi) VALUES (%s, '', 'Khách Vãng Lai')", (self.username_guest,))
                 self.id_guest = cursor.lastrowid
             else:
                 self.id_guest = row[0]
@@ -127,7 +112,6 @@ class QuanLyHoSo:
             conn.commit()
             cursor.close()
             conn.close()
-
     # ================= XÁC THỰC VÀ DI CƯ DỮ LIỆU =================
     def dang_nhap(self, username, password):
         conn = self._ket_noi()
@@ -188,13 +172,16 @@ class QuanLyHoSo:
     # ================= CHỨC NĂNG HỌC TẬP VÀ XẾP HẠNG =================
     def lay_thong_tin(self):
         conn = self._ket_noi()
-        if not conn: return {"ten_hien_thi": "Lỗi mạng", "diem_cao_nhat": 0, "so_lan_choi_game": 0}
+        if not conn: return {"ten_hien_thi": "Lỗi mạng", "diem_cao_nhat": 0, "so_lan_choi_game": 0, "thoi_gian_hoc": 0.0, "avatar": "🧑‍🚀"}
         cursor = conn.cursor()
-        cursor.execute("SELECT ten_hien_thi, diem_cao_nhat, so_lan_choi_game FROM NguoiDung WHERE id=%s",
-                       (self.id_tai_khoan_hien_tai,))
+        # Đọc thêm cột avatar
+        cursor.execute("SELECT ten_hien_thi, diem_cao_nhat, so_lan_choi_game, thoi_gian_hoc, avatar FROM NguoiDung WHERE id=%s", (self.id_tai_khoan_hien_tai,))
         row = cursor.fetchone()
         conn.close()
-        return {"ten_hien_thi": row[0], "diem_cao_nhat": row[1], "so_lan_choi_game": row[2]}
+        if row:
+            ava = row[4] if (len(row) > 4 and row[4]) else "🧑‍🚀"
+            return {"ten_hien_thi": row[0], "diem_cao_nhat": row[1], "so_lan_choi_game": row[2], "thoi_gian_hoc": row[3] if row[3] else 0.0, "avatar": ava}
+        return {"ten_hien_thi": "", "diem_cao_nhat": 0, "so_lan_choi_game": 0, "thoi_gian_hoc": 0.0, "avatar": "🧑‍🚀"}
 
     def cap_nhat_sau_khi_choi(self, diem_moi):
         du_lieu_cu = self.lay_thong_tin()
@@ -238,3 +225,56 @@ class QuanLyHoSo:
         data = cursor.fetchall()
         conn.close()
         return data
+
+    def cap_nhat_ten_hien_thi(self, ten_moi):
+        if not ten_moi or ten_moi.strip() == "":
+            return False, "Tên không được để trống!"
+
+        conn = self._ket_noi()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE NguoiDung SET ten_hien_thi=%s WHERE id=%s", (ten_moi, self.id_tai_khoan_hien_tai))
+            conn.commit()
+            conn.close()
+            return True, "Đổi tên thành công!"
+        return False, "Lỗi kết nối CSDL!"
+
+    def cap_nhat_thoi_gian_hoc(self, phut_vua_hoc):
+        if phut_vua_hoc <= 0: return
+        conn = self._ket_noi()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE NguoiDung SET thoi_gian_hoc = thoi_gian_hoc + %s WHERE id=%s",
+                           (phut_vua_hoc, self.id_tai_khoan_hien_tai))
+            conn.commit()
+            conn.close()
+
+    def ghi_nhan_loi_sai(self, tu_sai):
+        conn = self._ket_noi()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                           INSERT INTO ThongKeLoiSai (user_id, tu_sai, so_lan_sai)
+                           VALUES (%s, %s, 1) ON DUPLICATE KEY
+                           UPDATE so_lan_sai = so_lan_sai + 1
+                           """, (self.id_tai_khoan_hien_tai, tu_sai))
+            conn.commit()
+            conn.close()
+
+    def lay_top_loi_sai(self, top_n=3):
+        conn = self._ket_noi()
+        if not conn: return []
+        cursor = conn.cursor()
+        cursor.execute("SELECT tu_sai FROM ThongKeLoiSai WHERE user_id=%s ORDER BY so_lan_sai DESC LIMIT %s",
+                       (self.id_tai_khoan_hien_tai, top_n))
+        ds = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        return ds
+
+    def cap_nhat_avatar(self, avatar_moi):
+        conn = self._ket_noi()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE NguoiDung SET avatar=%s WHERE id=%s", (avatar_moi, self.id_tai_khoan_hien_tai))
+            conn.commit()
+            conn.close()

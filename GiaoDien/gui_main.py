@@ -80,6 +80,8 @@ class UngDungNhanDien(ctk.CTk):
         self.trang_hien_tai = "Học Tập"
         self.hien_thi_trang("Học Tập")
 
+        self.protocol("WM_DELETE_WINDOW", self.dong_ung_dung)
+
     def dinh_dang_giao_dien(self):
         ctk.set_appearance_mode("dark")
         self.mau_nen = "#121212"
@@ -96,6 +98,12 @@ class UngDungNhanDien(ctk.CTk):
         self.font_tieu_de = ("Segoe UI", 22, "bold")
         self.font_chu = ("Segoe UI", 15)
         self.font_chu_dam = ("Segoe UI", 15, "bold")
+
+    def dong_ung_dung(self):
+        """Bắt sự kiện khi bấm dấu X tắt App để lưu nốt thời gian"""
+        if self.camera_running:
+            self.tat_camera()  # Ép gọi hàm tắt cam để lưu thời gian xuống SQL
+        self.destroy()  # Đóng app an toàn
 
     def ve_menu_sidebar(self):
         self.sidebar = ctk.CTkFrame(self, width=250, corner_radius=0, fg_color=self.mau_sidebar)
@@ -373,6 +381,11 @@ class UngDungNhanDien(ctk.CTk):
         else:
             self.lbl_fc_trang_thai.configure(text="❌ Sai rồi, hãy nhìn kỹ ảnh lại nhé!", text_color="#e74c3c")
 
+            # --- ĐOẠN CODE BẮT LỖI SAI CHỐNG SPAM (MỚI THÊM) ---
+            if hasattr(self, 'logic_ho_so') and self.logic_ho_so:
+                self.logic_ho_so.ghi_nhan_loi_sai(self.muc_tieu_quiz_hien_tai)
+                # ---------------------------------------------------
+
     def dong_kiem_tra(self):
         """Khi bấm dấu X tắt góc phải"""
         self.dang_kiem_tra = False
@@ -484,8 +497,17 @@ class UngDungNhanDien(ctk.CTk):
             self.camera_thread = threading.Thread(target=self.luong_camera_ngam, daemon=True)
             self.camera_thread.start()
             self.cap_nhat_giao_dien()
+            self.cam_start_time = time.time()  # Bắt đầu tính giờ
 
     def tat_camera(self):
+        # Lưu thời gian
+        if hasattr(self, 'cam_start_time') and self.cam_start_time:
+            thoi_gian_chay_phut = (time.time() - self.cam_start_time) / 60.0
+            if hasattr(self, 'logic_ho_so') and self.logic_ho_so:
+                self.logic_ho_so.cap_nhat_thoi_gian_hoc(thoi_gian_chay_phut)
+            self.cam_start_time = None
+
+
         self.camera_running = False
         try:
             self.lbl_camera_main.configure(image="", text="[ ĐANG TẮT CAMERA... ]")
@@ -530,129 +552,255 @@ class UngDungNhanDien(ctk.CTk):
         except:
             pass
     # =======================================================
-    # TRANG 3: HỒ SƠ & BẢNG XẾP HẠNG
+    # TRANG 3: HỒ SƠ & BẢNG XẾP HẠNG (CÂN BẰNG & THỐNG KÊ)
     # =======================================================
     def tao_trang_ho_so(self):
         trang = ctk.CTkFrame(self.khung_chinh, fg_color="transparent")
-        ctk.CTkLabel(trang, text="TRUNG TÂM HỒ SƠ & THÀNH TÍCH", font=self.font_tieu_de_lon, text_color=self.mau_chu_dao).pack(pady=(20, 30))
+        ctk.CTkLabel(trang, text="TRUNG TÂM HỒ SƠ & THÀNH TÍCH", font=("Segoe UI Black", 28, "bold"),
+                     text_color="#00FFCC").pack(pady=(10, 20))
 
-        # Khung chia 2 cột
         khung_chia_cot = ctk.CTkFrame(trang, fg_color="transparent")
         khung_chia_cot.pack(fill="both", expand=True, padx=20)
         khung_chia_cot.grid_columnconfigure(0, weight=4)
         khung_chia_cot.grid_columnconfigure(1, weight=6)
 
-        # === CỘT TRÁI: THÔNG TIN CÁ NHÂN (LUÔN HIỂN THỊ) ===
-        khung_trai_hs = ctk.CTkFrame(khung_chia_cot, fg_color=self.mau_card, corner_radius=15)
-        khung_trai_hs.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        # ==========================================
+        # CỘT TRÁI (BỌC 2 KHỐI: PROFILE + THỐNG KÊ)
+        # ==========================================
+        self.khung_trai_wrapper = ctk.CTkFrame(khung_chia_cot, fg_color="transparent")
+        self.khung_trai_wrapper.grid(row=0, column=0, sticky="nsew", padx=(0, 15))
 
-        ctk.CTkLabel(khung_trai_hs, text="👤 THÔNG TIN CỦA TÔI", font=self.font_tieu_de).pack(pady=20)
-        self.lbl_hs_ten = ctk.CTkLabel(khung_trai_hs, text="Tên: ...", font=self.font_chu_dam)
-        self.lbl_hs_ten.pack(pady=10)
-        self.lbl_hs_khen_thuong = ctk.CTkLabel(khung_trai_hs, text="🏆 Kỷ Lục: 0", font=("Segoe UI", 26, "bold"), text_color="#FFCC00")
-        self.lbl_hs_khen_thuong.pack(pady=15)
-        self.lbl_hs_so_lan = ctk.CTkLabel(khung_trai_hs, text="Số lần chơi: 0", font=self.font_chu)
-        self.lbl_hs_so_lan.pack(pady=10)
+        # Khối 1: HỒ SƠ CHÍNH
+        khung_trai_hs = ctk.CTkFrame(self.khung_trai_wrapper, fg_color="#1A1A2E", corner_radius=20, border_width=2,
+                                     border_color="#16213E")
+        khung_trai_hs.pack(fill="x", pady=(0, 15))
 
-        self.btn_dang_xuat = ctk.CTkButton(khung_trai_hs, text="Đăng Xuất", fg_color="#c0392b", hover_color="#a93226", command=self.xu_ly_dang_xuat)
-        # Nút này sẽ được hiện lên nếu là User, ẩn đi nếu là Guest
+        # 1. Avatar (Bây giờ nó là một nút bấm)
+        khung_ava = ctk.CTkFrame(khung_trai_hs, fg_color="transparent", corner_radius=50, width=100, height=100)
+        khung_ava.pack(pady=(25, 10))
+        khung_ava.pack_propagate(False)
 
-        # === CỘT PHẢI: KHUNG ĐA NĂNG (LOGIN HOẶC LEADERBOARD) ===
-        self.khung_phai_hs = ctk.CTkFrame(khung_chia_cot, fg_color=self.mau_sidebar, corner_radius=15)
-        self.khung_phai_hs.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        self.btn_hs_avatar = ctk.CTkButton(khung_ava, text="🧑‍🚀", font=("Segoe UI", 55), fg_color="transparent",
+                                           hover_color="#16213E", command=self.xu_ly_doi_avatar)
+        self.btn_hs_avatar.place(relx=0.5, rely=0.5, anchor="center")
 
-        self.lbl_tieu_de_phai = ctk.CTkLabel(self.khung_phai_hs, text="ĐANG TẢI...", font=self.font_tieu_de)
-        self.lbl_tieu_de_phai.pack(pady=20)
+        self.lbl_hs_ten = ctk.CTkLabel(khung_trai_hs, text="Tên: ...", font=("Segoe UI Black", 24, "bold"),
+                                       text_color="#E94560")
+        self.lbl_hs_ten.pack(pady=(0, 5))
 
-        # 1. Bảng Đăng Nhập (Sẽ nhét vào cột phải nếu là Guest)
-        self.khung_dang_nhap = ctk.CTkFrame(self.khung_phai_hs, fg_color="transparent")
-        self.txt_user = ctk.CTkEntry(self.khung_dang_nhap, placeholder_text="Tên đăng nhập", width=300, height=40)
-        self.txt_user.pack(pady=10)
-        self.txt_pass = ctk.CTkEntry(self.khung_dang_nhap, placeholder_text="Mật khẩu", show="*", width=300, height=40)
-        self.txt_pass.pack(pady=10)
-        self.txt_ten = ctk.CTkEntry(self.khung_dang_nhap, placeholder_text="Tên hiển thị (chỉ dùng khi đăng ký)", width=300, height=40)
-        self.txt_ten.pack(pady=10)
+        self.btn_doi_ten = ctk.CTkButton(khung_trai_hs, text="✏️ CHỈNH SỬA", font=self.font_chu_dam, fg_color="#E94560",
+                                         hover_color="#C81D4E", corner_radius=20, height=35, command=self.xu_ly_doi_ten)
 
-        self.lbl_loi_auth = ctk.CTkLabel(self.khung_dang_nhap, text="", text_color="#e74c3c")
-        self.lbl_loi_auth.pack(pady=5)
+        ctk.CTkFrame(khung_trai_hs, height=2, fg_color="#333").pack(fill="x", padx=40, pady=15)
 
-        khung_nut_auth = ctk.CTkFrame(self.khung_dang_nhap, fg_color="transparent")
-        khung_nut_auth.pack(pady=10)
-        ctk.CTkButton(khung_nut_auth, text="Đăng Nhập", command=self.xu_ly_dang_nhap, width=140).pack(side="left", padx=10)
-        ctk.CTkButton(khung_nut_auth, text="Đăng Ký", fg_color="#27ae60", hover_color="#2ecc71", command=self.xu_ly_dang_ky, width=140).pack(side="left", padx=10)
+        self.lbl_hs_khen_thuong = ctk.CTkLabel(khung_trai_hs, text="🏆 Kỷ Lục: 0 điểm", font=("Segoe UI", 20, "bold"),
+                                               text_color="#FFD700")
+        self.lbl_hs_khen_thuong.pack(pady=5)
+        self.lbl_hs_so_lan = ctk.CTkLabel(khung_trai_hs, text="🎮 Đã chơi: 0 trận", font=("Segoe UI", 16),
+                                          text_color="#A0A0A0")
+        self.lbl_hs_so_lan.pack(pady=5)
 
-        # 2. Bảng Xếp Hạng (Sẽ nhét vào cột phải nếu là User)
-        self.khung_danh_sach_top = ctk.CTkScrollableFrame(self.khung_phai_hs, fg_color="transparent")
+        ctk.CTkFrame(khung_trai_hs, height=2, fg_color="#333").pack(fill="x", padx=40, pady=15)
+
+        ctk.CTkLabel(khung_trai_hs, text="📊 TIẾN ĐỘ HỌC TẬP", font=("Segoe UI", 16, "bold"), text_color="#00FFCC").pack(
+            pady=(0, 5))
+        self.lbl_tien_do = ctk.CTkLabel(khung_trai_hs, text="Đã học: 0 / 0 bài", font=self.font_chu)
+        self.lbl_tien_do.pack()
+        self.thanh_tien_do = ctk.CTkProgressBar(khung_trai_hs, width=220, height=12, progress_color="#00E676",
+                                                fg_color="#333", corner_radius=10)
+        self.thanh_tien_do.set(0)
+        self.thanh_tien_do.pack(pady=(5, 15))
+
+        self.btn_dang_xuat = ctk.CTkButton(khung_trai_hs, text="Đăng Xuất", font=self.font_chu_dam, fg_color="#555",
+                                           hover_color="#333", corner_radius=10, command=self.xu_ly_dang_xuat)
+        self.btn_dang_xuat.pack(pady=(0, 20))
+
+        # Khối 2: 2 Ô VUÔNG THỐNG KÊ (HAY SAI & THỜI GIAN) NẰM ĐỘC LẬP
+        khung_thong_ke = ctk.CTkFrame(self.khung_trai_wrapper, fg_color="transparent")
+        khung_thong_ke.pack(fill="x")
+        khung_thong_ke.grid_columnconfigure(0, weight=1)
+        khung_thong_ke.grid_columnconfigure(1, weight=1)
+
+        # 2a. Khối Lỗi Sai (Nền đỏ sẫm)
+        self.khung_loi_sai_bg = ctk.CTkFrame(khung_thong_ke, fg_color="#2A1616", corner_radius=15, border_width=1,
+                                             border_color="#3A1A1A")
+        self.khung_loi_sai_bg.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        ctk.CTkLabel(self.khung_loi_sai_bg, text="⚠️ HAY SAI", font=("Segoe UI Black", 14), text_color="#FF4C4C").pack(
+            pady=(15, 5))
+        self.khung_chu_sai = ctk.CTkFrame(self.khung_loi_sai_bg, fg_color="transparent")
+        self.khung_chu_sai.pack(pady=(0, 15))
+
+        # 2b. Khối Thời Gian (Nền xanh sẫm)
+        self.khung_thoi_gian_bg = ctk.CTkFrame(khung_thong_ke, fg_color="#162A20", corner_radius=15, border_width=1,
+                                               border_color="#1A3A25")
+        self.khung_thoi_gian_bg.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        ctk.CTkLabel(self.khung_thoi_gian_bg, text="⏱️ TỔNG GIỜ", font=("Segoe UI Black", 14),
+                     text_color="#00E676").pack(pady=(15, 5))
+        self.lbl_hs_thoi_gian = ctk.CTkLabel(self.khung_thoi_gian_bg, text="0h 0p", font=("Segoe UI Black", 20),
+                                             text_color="#FFF")
+        self.lbl_hs_thoi_gian.pack(pady=(0, 15))
+        # ==========================================
+        # CỘT PHẢI: BẢNG XẾP HẠNG / ĐĂNG NHẬP
+        # ==========================================
+        # Bọc cột phải bằng khung giống hệt cột trái để cân bằng
+        self.khung_phai_hs = ctk.CTkFrame(khung_chia_cot, fg_color="#1A1A2E", corner_radius=20, border_width=2, border_color="#16213E")
+        self.khung_phai_hs.grid(row=0, column=1, sticky="nsew", padx=(15, 0))
+
+        # Tiêu đề cột phải (Căn lề trên 30 khớp với Avatar cột trái)
+        self.lbl_tieu_de_phai = ctk.CTkLabel(self.khung_phai_hs, text="ĐANG TẢI...", font=("Segoe UI Black", 20, "bold"))
+        self.lbl_tieu_de_phai.pack(pady=(30, 20))
+
+        # 1. Bảng Đăng Nhập / Đăng Ký (Tabview)
+        self.khung_dang_nhap = ctk.CTkTabview(self.khung_phai_hs, width=450, corner_radius=15, fg_color=self.mau_card, segmented_button_selected_color=self.mau_chu_dao, segmented_button_selected_hover_color=self.mau_hover)
+        self.khung_dang_nhap.add("🔑 ĐĂNG NHẬP")
+        self.khung_dang_nhap.add("📝 TẠO TÀI KHOẢN MỚI")
+
+        self.txt_user_login = ctk.CTkEntry(self.khung_dang_nhap.tab("🔑 ĐĂNG NHẬP"), placeholder_text="Tên đăng nhập", width=300, height=45, font=self.font_chu, corner_radius=10)
+        self.txt_user_login.pack(pady=(30, 10))
+        self.txt_pass_login = ctk.CTkEntry(self.khung_dang_nhap.tab("🔑 ĐĂNG NHẬP"), placeholder_text="Mật khẩu", show="*", width=300, height=45, font=self.font_chu, corner_radius=10)
+        self.txt_pass_login.pack(pady=10)
+        self.lbl_loi_login = ctk.CTkLabel(self.khung_dang_nhap.tab("🔑 ĐĂNG NHẬP"), text="", text_color="#e74c3c", font=self.font_chu)
+        self.lbl_loi_login.pack(pady=5)
+        ctk.CTkButton(self.khung_dang_nhap.tab("🔑 ĐĂNG NHẬP"), text="🔓 BẮT ĐẦU", font=("Segoe UI Black", 16), height=45, corner_radius=10, fg_color=self.mau_chu_dao, hover_color=self.mau_hover, command=self.xu_ly_dang_nhap, width=300).pack(pady=(10, 20))
+
+        self.txt_user_reg = ctk.CTkEntry(self.khung_dang_nhap.tab("📝 TẠO TÀI KHOẢN MỚI"), placeholder_text="Nhập tên đăng nhập", width=300, height=45, font=self.font_chu, corner_radius=10)
+        self.txt_user_reg.pack(pady=(15, 10))
+        self.txt_pass_reg = ctk.CTkEntry(self.khung_dang_nhap.tab("📝 TẠO TÀI KHOẢN MỚI"), placeholder_text="Tạo mật khẩu", show="*", width=300, height=45, font=self.font_chu, corner_radius=10)
+        self.txt_pass_reg.pack(pady=10)
+        self.txt_ten_reg = ctk.CTkEntry(self.khung_dang_nhap.tab("📝 TẠO TÀI KHOẢN MỚI"), placeholder_text="Tên hiển thị (Biệt danh)", width=300, height=45, font=self.font_chu, corner_radius=10)
+        self.txt_ten_reg.pack(pady=10)
+        self.lbl_loi_reg = ctk.CTkLabel(self.khung_dang_nhap.tab("📝 TẠO TÀI KHOẢN MỚI"), text="", text_color="#e74c3c", font=self.font_chu)
+        self.lbl_loi_reg.pack(pady=5)
+        ctk.CTkButton(self.khung_dang_nhap.tab("📝 TẠO TÀI KHOẢN MỚI"), text="🚀 GHI DANH", font=("Segoe UI Black", 16), height=45, corner_radius=10, fg_color="#27ae60", hover_color="#2ecc71", command=self.xu_ly_dang_ky, width=300).pack(pady=(10, 20))
+
+        # 2. Bảng Xếp Hạng
+        self.khung_danh_sach_top = ctk.CTkScrollableFrame(self.khung_phai_hs, fg_color="transparent", corner_radius=15)
 
         return trang
+
+    def xu_ly_doi_ten(self):
+        """Mở hộp thoại đổi tên và cập nhật DB"""
+        dialog = ctk.CTkInputDialog(text="Nhập tên hiển thị mới của bạn:", title="Đổi Tên Hiển Thị")
+        ten_moi = dialog.get_input()
+
+        if ten_moi:
+            if hasattr(self, 'logic_ho_so') and self.logic_ho_so:
+                ok, msg = self.logic_ho_so.cap_nhat_ten_hien_thi(ten_moi)
+                if ok:
+                    self.ve_lai_giao_dien_ho_so()
+                else:
+                    print(msg)
 
     def ve_lai_giao_dien_ho_so(self):
         """Kiểm tra thân phận và sắp xếp lại giao diện cho phù hợp"""
         if not self.logic_ho_so: return
 
-        # Luôn luôn cập nhật thông tin cột trái
         du_lieu = self.logic_ho_so.lay_thong_tin()
-        self.lbl_hs_ten.configure(text=f"Học viên: {du_lieu['ten_hien_thi']}")
+        self.lbl_hs_ten.configure(text=f"{du_lieu['ten_hien_thi']}")
         self.lbl_hs_khen_thuong.configure(text=f"🏆 Kỷ Lục: {du_lieu['diem_cao_nhat']} điểm")
-        self.lbl_hs_so_lan.configure(text=f"🎮 Đã chơi: {du_lieu['so_lan_choi_game']} lần")
+        self.lbl_hs_so_lan.configure(text=f"🎮 Đã chơi: {du_lieu['so_lan_choi_game']} trận")
+        self.btn_hs_avatar.configure(text=du_lieu.get('avatar', '🧑‍🚀'))
 
-        # Kiểm tra xem có phải là Guest không
-        is_guest = (self.logic_ho_so.id_tai_khoan_hien_tai == self.logic_ho_so.id_guest)
+        # Load Thời gian thực tế từ DB
+        tong_phut = float(du_lieu.get('thoi_gian_hoc', 0.0))
+        gio = int(tong_phut // 60)
+        phut = int(tong_phut % 60)
+        giay = int((tong_phut * 60) % 60)
 
+        # Cập nhật hiển thị lên giao diện
+        self.lbl_hs_thoi_gian.configure(text=f"{gio}h {phut}p {giay}s")
+
+        try:
+            tong_so_bai = len(self.logic_hoc.danh_sach_bai_hoc) if self.logic_hoc and self.logic_hoc.danh_sach_bai_hoc else 0
+            da_hoc = len(self.logic_ho_so.lay_danh_sach_da_hoc())
+            self.lbl_tien_do.configure(text=f"Đã học: {da_hoc} / {tong_so_bai} bài")
+            if tong_so_bai > 0: self.thanh_tien_do.set(da_hoc / tong_so_bai)
+            else: self.thanh_tien_do.set(0)
+
+            # Load Top 3 từ sai nhiều nhất
+            for widget in self.khung_chu_sai.winfo_children():
+                widget.destroy()
+            top_3 = self.logic_ho_so.lay_top_loi_sai(top_n=3)
+
+            if not top_3:
+                ctk.CTkLabel(self.khung_chu_sai, text="Chưa có", text_color="#A0A0A0", font=self.font_chu).pack()
+            else:
+                for chu in top_3:
+                    chip = ctk.CTkLabel(self.khung_chu_sai, text=chu, font=("Segoe UI Black", 14), text_color="#FFF", fg_color="#C0392B", corner_radius=5, width=40, height=25)
+                    chip.pack(side="left", padx=3)
+        except Exception as e: pass
+
+        # 3. Kiểm tra Guest từ DB
+        is_guest = True
+        try:
+            conn = self.logic_ho_so._ket_noi()
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT username FROM NguoiDung WHERE id=%s", (self.logic_ho_so.id_tai_khoan_hien_tai,))
+                row = cursor.fetchone()
+                if row and "_guest_" not in row[0]:
+                    is_guest = False
+                conn.close()
+        except Exception as e:
+            is_guest = (self.logic_ho_so.id_tai_khoan_hien_tai == self.logic_ho_so.id_guest)
+
+        # 4. Điều hướng giao diện
         if is_guest:
-            # Nếu là KHÁCH: Cột phải hiện form Đăng Nhập
+            self.btn_doi_ten.pack_forget()
+            self.btn_hs_avatar.configure(state="disabled")
+            self.btn_doi_ten.pack_forget()
             self.khung_danh_sach_top.pack_forget()
-            self.btn_dang_xuat.pack_forget() # Khách thì không có nút đăng xuất
+            self.btn_dang_xuat.pack_forget()
 
-            self.lbl_tieu_de_phai.configure(text="🔒 ĐĂNG NHẬP ĐỂ MỞ KHÓA BẢNG XẾP HẠNG", text_color="#e67e22")
-            self.khung_dang_nhap.pack(fill="both", expand=True, padx=20)
+            self.lbl_tieu_de_phai.configure(text="🔒 ĐĂNG NHẬP ĐỂ ĐUA TOP", text_color="#e67e22")
+            self.khung_dang_nhap.pack(fill="both", expand=True, padx=40, pady=(0, 30))
         else:
-            # Nếu là USER: Cột phải hiện Bảng Xếp Hạng
+            self.btn_doi_ten.pack(pady=10)
+            self.btn_hs_avatar.configure(state="normal")
+            self.btn_doi_ten.pack(pady=10)
             self.khung_dang_nhap.pack_forget()
-            self.btn_dang_xuat.pack(side="bottom", pady=20) # Hiện nút đăng xuất
+            self.btn_dang_xuat.pack(side="bottom", pady=20)
 
             self.lbl_tieu_de_phai.configure(text="🌟 BẢNG VÀNG THÀNH TÍCH", text_color="#2ecc71")
-            self.khung_danh_sach_top.pack(fill="both", expand=True, padx=20, pady=10)
+            self.khung_danh_sach_top.pack(fill="both", expand=True, padx=20, pady=(0, 20))
 
-            # Quét DB và in ra Top Người Chơi
             for widget in self.khung_danh_sach_top.winfo_children():
                 widget.destroy()
             try:
                 top_players = self.logic_ho_so.lay_bang_xep_hang(top_n=5)
                 if not top_players:
-                    ctk.CTkLabel(self.khung_danh_sach_top, text="Chưa có ai ghi điểm. Hãy là người đầu tiên!", text_color="#888").pack(pady=20)
+                    ctk.CTkLabel(self.khung_danh_sach_top, text="Chưa có ai ghi điểm. Hãy là người đầu tiên!", text_color="#888", font=self.font_chu).pack(pady=20)
                 else:
                     huy_hieu = ["🥇", "🥈", "🥉", "🏅", "🏅"]
                     for i, (ten, diem) in enumerate(top_players):
-                        thanh = ctk.CTkFrame(self.khung_danh_sach_top, fg_color="#3A3B3C", corner_radius=8)
-                        thanh.pack(fill="x", pady=5)
+                        thanh = ctk.CTkFrame(self.khung_danh_sach_top, fg_color="#2A2A40", corner_radius=10)
+                        thanh.pack(fill="x", pady=6)
                         icon = huy_hieu[i] if i < len(huy_hieu) else "⭐"
-                        ctk.CTkLabel(thanh, text=f"{icon} Hạng {i+1}: {ten}", font=self.font_chu_dam).pack(side="left", padx=15, pady=10)
-                        ctk.CTkLabel(thanh, text=f"{diem} điểm", font=self.font_chu_dam, text_color="#FFCC00").pack(side="right", padx=15, pady=10)
+                        ctk.CTkLabel(thanh, text=f"{icon} {ten}", font=self.font_chu_dam).pack(side="left", padx=20, pady=15)
+                        ctk.CTkLabel(thanh, text=f"{diem} điểm", font=self.font_chu_dam, text_color="#FFCC00").pack(side="right", padx=20, pady=15)
             except Exception as e:
-                print(f"Lỗi Leaderboard: {e}")
-
-    # Các hàm xử lý Auth
+                pass
+    # ================= CÁC HÀM XỬ LÝ AUTH (CẬP NHẬT THEO TABVIEW MỚI) =================
     def xu_ly_dang_nhap(self):
-        ok, msg = self.logic_ho_so.dang_nhap(self.txt_user.get(), self.txt_pass.get())
+        ok, msg = self.logic_ho_so.dang_nhap(self.txt_user_login.get(), self.txt_pass_login.get())
         if ok:
-            self.lbl_loi_auth.configure(text="")
-            self.txt_user.delete(0, 'end')
-            self.txt_pass.delete(0, 'end')
+            self.lbl_loi_login.configure(text="")
+            self.txt_user_login.delete(0, 'end')
+            self.txt_pass_login.delete(0, 'end')
             self.ve_lai_giao_dien_ho_so()
             self.cap_nhat_ui_danh_sach_bai_hoc()
-        else: self.lbl_loi_auth.configure(text=msg)
+        else: self.lbl_loi_login.configure(text=msg)
 
     def xu_ly_dang_ky(self):
-        ok, msg = self.logic_ho_so.dang_ky(self.txt_user.get(), self.txt_pass.get(), self.txt_ten.get())
+        ok, msg = self.logic_ho_so.dang_ky(self.txt_user_reg.get(), self.txt_pass_reg.get(), self.txt_ten_reg.get())
         if ok:
-            self.lbl_loi_auth.configure(text="")
-            self.txt_user.delete(0, 'end')
-            self.txt_pass.delete(0, 'end')
-            self.txt_ten.delete(0, 'end')
+            self.lbl_loi_reg.configure(text="")
+            self.txt_user_reg.delete(0, 'end')
+            self.txt_pass_reg.delete(0, 'end')
+            self.txt_ten_reg.delete(0, 'end')
             self.ve_lai_giao_dien_ho_so()
             self.cap_nhat_ui_danh_sach_bai_hoc()
-        else: self.lbl_loi_auth.configure(text=msg)
+        else: self.lbl_loi_reg.configure(text=msg)
 
     def xu_ly_dang_xuat(self):
         self.logic_ho_so.dang_xuat()
@@ -781,6 +929,45 @@ class UngDungNhanDien(ctk.CTk):
                 self.thanh_thoi_gian.set(1.0)
                 self.lbl_game_tin_nhan.configure(text="Múa tay thật nhanh để sinh tồn!", text_color=self.mau_thanh_cong)
                 self.btn_toggle_game.configure(text="⏹ DỪNG LẠI", fg_color="#555555", hover_color="#333333")
+
+    def xu_ly_doi_avatar(self):
+        """Hiển thị cửa sổ pop-up chứa kho Avatar để người dùng chọn"""
+        top = ctk.CTkToplevel(self)
+        top.title("Đổi Avatar")
+        top.geometry("380x300")
+        top.transient(self)  # Nổi lên trên cửa sổ chính
+        top.grab_set()  # Khóa thao tác cửa sổ chính khi đang mở bảng này
+
+        ctk.CTkLabel(top, text="✨ CHỌN AVATAR MỚI", font=("Segoe UI Black", 18), text_color="#00FFCC").pack(
+            pady=(20, 10))
+
+        khung_icons = ctk.CTkFrame(top, fg_color="transparent")
+        khung_icons.pack(pady=10)
+
+        # Kho Avatar phong phú
+        danh_sach_avatar = [
+            "🧑‍🚀", "👨‍💻", "👩‍🏫", "🕵️‍♂️",
+            "🦸‍♀️", "🧙‍♂️", "🤖", "👽",
+            "👻", "🦊", "🐯", "🐼"
+        ]
+
+        row, col = 0, 0
+        for ava in danh_sach_avatar:
+            btn = ctk.CTkButton(khung_icons, text=ava, font=("Segoe UI", 35), width=60, height=60,
+                                fg_color="transparent", hover_color="#2C2C2C",
+                                command=lambda a=ava: self.luu_avatar_moi(a, top))
+            btn.grid(row=row, column=col, padx=5, pady=5)
+            col += 1
+            if col > 3:
+                col = 0
+                row += 1
+
+    def luu_avatar_moi(self, avatar_chon, cua_so_top):
+        """Lưu avatar mới vào CSDL và vẽ lại màn hình"""
+        if hasattr(self, 'logic_ho_so') and self.logic_ho_so:
+            self.logic_ho_so.cap_nhat_avatar(avatar_chon)
+            self.ve_lai_giao_dien_ho_so()  # Update ngay lên giao diện
+        cua_so_top.destroy()
 
     def cap_nhat_giao_dien(self):
         if self.camera_running and self.latest_frame is not None:
