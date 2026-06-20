@@ -7,7 +7,7 @@ from sklearn.metrics import accuracy_score, classification_report
 
 
 def chay_huan_luyen():
-    print("\n--- BƯỚC 2: HUẤN LUYỆN RANDOM FOREST ---") 
+    print("\n--- BƯỚC 2: HUẤN LUYỆN RANDOM FOREST ---")
     csv_file = 'dataset_tinh.csv'
     model_file = 'model_tinh.pkl'
 

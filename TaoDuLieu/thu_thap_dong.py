@@ -9,7 +9,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['GLOG_minloglevel'] = '2'
 
 # Cấu hình dữ liệu chuỗi động
-KY_HIEU_DONG = ['J', 'Z', 'NONE']
+KY_HIEU_DONG = ['J', 'Z', 'None']
 SO_FRAME = 45  # 30 khung hình liên tiếp cho 1 cử chỉ (~1 giây)
 SO_MAU_MOI_KY_HIEU = 500  # Đảm bảo đủ dữ liệu mẫu cho Deep Learning
 THU_MUC_DATASET = 'dataset_dong'

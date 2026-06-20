@@ -8,7 +8,7 @@ class QuanLyBaiHoc:
     def __init__(self):
         self.muc_tieu_hien_tai = ""
         # Đường dẫn tới thư mục ảnh
-        self.thu_muc_anh = os.path.join(os.getcwd(), "assets", "images")
+        self.thu_muc_anh = os.path.join(os.getcwd(), "assets", "pic")
         # Đường dẫn tới thư mục chứa các file mô tả (.txt)
         self.thu_muc_mo_ta = os.path.join(os.getcwd(), "assets", "mo_ta")
 
@@ -77,14 +77,14 @@ class QuanLyBaiHoc:
     # CÁC HÀM XỬ LÝ LOGIC KIỂM TRA & MÔ TẢ
     # ==========================================
     def _trich_xuat_chu(self, ten_bai):
-        """Hàm hỗ trợ cắt chuỗi lấy chữ cái/từ (Hỗ trợ tốt cho từ có khoảng trắng)"""
+        """Hàm hỗ trợ cắt chuỗi lấy chữ cái/từ (Hỗ trợ đa định dạng để không bị lỗi mô tả)"""
         try:
-            # Ví dụ: ten_bai = "Bài 10: Chữ Xin chào (Động)"
-            # split("Chữ ")[1] -> "Xin chào (Động)"
-            chuoi_cat = ten_bai.split("Chữ ")[1]
-            # split(" (")[0] -> "Xin chào" (Bỏ đi chữ Động/Tĩnh)
-            chu_cai_hoac_tu = chuoi_cat.split(" (")[0]
-            return chu_cai_hoac_tu
+            if "Chữ " in ten_bai:
+                chuoi_cat = ten_bai.split("Chữ ")[1]
+                chu_cai_hoac_tu = chuoi_cat.split(" (")[0]
+                return chu_cai_hoac_tu.strip().upper()
+            else:
+                return str(ten_bai).strip().upper()
         except:
             return "A"
 
