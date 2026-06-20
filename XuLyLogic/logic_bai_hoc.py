@@ -20,6 +20,7 @@ class QuanLyBaiHoc:
 
     def _lay_danh_sach_bai_hoc(self):
         danh_sach = []
+        chu_da_them = set()  # BỘ LỌC CHỐNG TRÙNG LẶP
         dem = 1
 
         # 1. Đọc kho Tĩnh
@@ -29,20 +30,30 @@ class QuanLyBaiHoc:
                 with open(duong_dan_tinh, 'rb') as f:
                     model = pickle.load(f)
                     for chu in model.classes_:
-                        danh_sach.append(f"Bài {dem}: Chữ {chu} (Tĩnh)")
-                        dem += 1
+                        # Làm sạch dữ liệu
+                        chu_sach = str(chu).strip().upper()
+
+                        # CHỈ THÊM VÀO NẾU CHỮ NÀY CHƯA TỪNG XUẤT HIỆN
+                        if chu_sach not in chu_da_them and chu_sach != "":
+                            danh_sach.append(f"Bài {dem}: Chữ {chu_sach} (Tĩnh)")
+                            chu_da_them.add(chu_sach)  # Đánh dấu là đã có chữ này
+                            dem += 1
             except Exception as e:
                 print(f"Lỗi đọc model tĩnh: {e}")
 
-        # 2. Đọc kho Động (ĐÃ MỞ KHÓA)
+        # 2. Đọc kho Động
         duong_dan_dong = os.path.join("KhoDuLieu", "model_dong_labels.npy")
         if os.path.exists(duong_dan_dong):
             try:
-                # Dùng allow_pickle=True để tránh lỗi load numpy array string ở một số phiên bản
                 labels = np.load(duong_dan_dong, allow_pickle=True)
                 for chu in labels:
-                    danh_sach.append(f"Bài {dem}: Chữ {chu} (Động)")
-                    dem += 1
+                    chu_sach = str(chu).strip().upper()
+
+                    # Bộ lọc cũng áp dụng luôn cho kho động để tránh trùng với kho tĩnh
+                    if chu_sach not in chu_da_them and chu_sach not in ['NONE', '']:
+                        danh_sach.append(f"Bài {dem}: Chữ {chu_sach} (Động)")
+                        chu_da_them.add(chu_sach)
+                        dem += 1
             except Exception as e:
                 print(f"Lỗi đọc model động: {e}")
 

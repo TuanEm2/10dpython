@@ -137,23 +137,35 @@ class QuanLyHoSo:
 
         cursor = conn.cursor()
         try:
-            # Lấy tiến độ của tài khoản Khách trên máy này
-            cursor.execute("SELECT diem_cao_nhat, so_lan_choi_game FROM NguoiDung WHERE id=%s", (self.id_guest,))
-            diem, so_lan = cursor.fetchone()
+            # 1. LẤY TOÀN BỘ DỮ LIỆU CỦA KHÁCH (Đã bổ sung thoi_gian_hoc)
+            cursor.execute("SELECT diem_cao_nhat, so_lan_choi_game, thoi_gian_hoc FROM NguoiDung WHERE id=%s",
+                           (self.id_guest,))
+            row = cursor.fetchone()
+            diem = row[0] if row else 0
+            so_lan = row[1] if row else 0
+            thoi_gian = row[2] if row and len(row) > 2 and row[2] else 0.0
 
-            # Chuyển qua nhà mới
+            # 2. BƠM VÀO NHÀ MỚI (Thêm cột thoi_gian_hoc)
             cursor.execute(
-                "INSERT INTO NguoiDung (username, password, ten_hien_thi, diem_cao_nhat, so_lan_choi_game) VALUES (%s, %s, %s, %s, %s)",
-                (username, password, ten_hien_thi, diem, so_lan))
+                "INSERT INTO NguoiDung (username, password, ten_hien_thi, diem_cao_nhat, so_lan_choi_game, thoi_gian_hoc) VALUES (%s, %s, %s, %s, %s, %s)",
+                (username, password, ten_hien_thi, diem, so_lan, thoi_gian))
             new_id = cursor.lastrowid
 
+            # 3. DI CƯ BẢNG TIẾN ĐỘ HỌC TẬP
             cursor.execute(
                 "INSERT IGNORE INTO TienDoHocTap (user_id, ten_bai_hoc) SELECT %s, ten_bai_hoc FROM TienDoHocTap WHERE user_id=%s",
                 (new_id, self.id_guest))
 
-            # Reset nhà cũ của Guest
-            cursor.execute("UPDATE NguoiDung SET diem_cao_nhat=0, so_lan_choi_game=0 WHERE id=%s", (self.id_guest,))
+            # 4. DI CƯ BẢNG THỐNG KÊ LỖI SAI (MỚI)
+            cursor.execute(
+                "INSERT IGNORE INTO ThongKeLoiSai (user_id, tu_sai, so_lan_sai) SELECT %s, tu_sai, so_lan_sai FROM ThongKeLoiSai WHERE user_id=%s",
+                (new_id, self.id_guest))
+
+            # 5. RESET LẠI NHÀ CŨ CỦA GUEST (Dọn dẹp sạch sẽ)
+            cursor.execute("UPDATE NguoiDung SET diem_cao_nhat=0, so_lan_choi_game=0, thoi_gian_hoc=0.0 WHERE id=%s",
+                           (self.id_guest,))
             cursor.execute("DELETE FROM TienDoHocTap WHERE user_id=%s", (self.id_guest,))
+            cursor.execute("DELETE FROM ThongKeLoiSai WHERE user_id=%s", (self.id_guest,))
 
             conn.commit()
             self.id_tai_khoan_hien_tai = new_id

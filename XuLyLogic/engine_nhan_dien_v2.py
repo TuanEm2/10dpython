@@ -5,7 +5,7 @@ import os
 import threading
 import time
 import numpy as np
-from collections import Counter
+from collections import Counter, deque
 import traceback
 
 import torch
@@ -19,7 +19,7 @@ SO_FRAME_LSTM = 45
 SO_TOA_DO = 126
 NGUONG_TIN_CAY_TINH = 0.60
 NGUONG_TIN_CAY_DONG = 0.85
-NGUONG_CHUYEN_DONG = 2.0  # Ngưỡng chuyển động (Đã tăng)
+NGUONG_CHUYEN_DONG = 2.0
 THOI_GIAN_DONG_BANG = 1.5
 
 
@@ -98,12 +98,17 @@ class BoXuLyNhanDienKetHop:
         self.frames_rec = []
         self.toa_do_frame_truoc = None
         self.thoi_diem_dong_bang = 0
+
         self.lich_su_chu = []
+        self.chu_chot_tinh_on_dinh = "..."
+
+        self.trail_history = deque(maxlen=SO_FRAME_LSTM)
 
         self.ket_qua_chu = "..."
         self.ket_qua_tin_cay = 0.0
         self.ket_qua_nguon = "..."
         self.ket_qua_landmarks = None
+        self.ket_qua_trang_thai = "TINH"
 
         self.frame_to_process = None
         self.lock = threading.Lock()
@@ -128,8 +133,8 @@ class BoXuLyNhanDienKetHop:
             hands = self.mp_hands.Hands(
                 max_num_hands=1,
                 model_complexity=1,
-                min_detection_confidence=0.6,
-                min_tracking_confidence=0.6
+                min_detection_confidence=0.75,
+                min_tracking_confidence=0.75
             )
 
             while self.is_running:
@@ -160,6 +165,7 @@ class BoXuLyNhanDienKetHop:
                         self.trang_thai = "TINH"
                         self.frames_rec = []
                         self.lich_su_chu = []
+                        self.chu_chot_tinh_on_dinh = "..."
                         chu_tam = "..."
                         tin_cay_tam = 0.0
                         nguon_tam = "..."
@@ -168,9 +174,9 @@ class BoXuLyNhanDienKetHop:
                             landmarks_tam = result.multi_hand_landmarks[0]
                         with self.lock:
                             self.ket_qua_landmarks = landmarks_tam
+                            self.ket_qua_trang_thai = self.trang_thai
                         continue
 
-                # --- QUY TRÌNH XỬ LÝ CHÍNH ---
                 if result.multi_hand_landmarks:
                     landmarks_tam = result.multi_hand_landmarks[0]
                     toa_do = trich_xuat_toa_do(landmarks_tam)
@@ -185,41 +191,49 @@ class BoXuLyNhanDienKetHop:
                         dac_trung = toa_do + van_toc
                         self.toa_do_frame_truoc = toa_do.copy()
 
-                        # CHẠY TRƯỚC MODEL TĨNH ĐỂ XEM ĐỘ TIN CẬY
-                        chu_tinh_tam = "?"
-                        tin_cay_tinh_tam = 0.0
+                        # Đổi ? thành ...
+                        chu_tinh_raw = "..."
+                        tin_cay_tinh_raw = 0.0
                         if self.model_tinh is not None:
                             xac_suat_tinh = self.model_tinh.predict_proba([toa_do])[0]
                             vi_tri_tinh = xac_suat_tinh.argmax()
-                            tin_cay_tinh_tam = float(xac_suat_tinh[vi_tri_tinh])
-                            chu_tinh_tam = self.model_tinh.classes_[vi_tri_tinh]
+                            tin_cay_tinh_raw = float(xac_suat_tinh[vi_tri_tinh])
+                            chu_tinh_raw = self.model_tinh.classes_[vi_tri_tinh]
 
-                        # --- TRẠNG THÁI 1: TĨNH ---
                         if self.trang_thai == "TINH":
-                            # CƠ CHẾ KHÓA TĨNH
-                            nguong_thuc_te = NGUONG_CHUYEN_DONG * 3.0 if tin_cay_tinh_tam > 0.80 else NGUONG_CHUYEN_DONG
+                            nguong_thuc_te = NGUONG_CHUYEN_DONG * 3.0 if tin_cay_tinh_raw > 0.80 else NGUONG_CHUYEN_DONG
 
                             if muc_do_chuyen_dong > nguong_thuc_te:
                                 self.trang_thai = "DANG_REC"
                                 self.frames_rec = [dac_trung]
+                                self.chu_chot_tinh_on_dinh = "..."
                                 chu_tam = "..."
                                 nguon_tam = "REC: 1"
                                 tin_cay_tam = 0.0
                             else:
-                                if tin_cay_tinh_tam >= NGUONG_TIN_CAY_TINH:
-                                    self.lich_su_chu.append(chu_tinh_tam)
-                                    if len(self.lich_su_chu) > 10:
+                                if tin_cay_tinh_raw >= NGUONG_TIN_CAY_TINH:
+                                    self.lich_su_chu.append(chu_tinh_raw)
+                                    if len(self.lich_su_chu) > 25:
                                         self.lich_su_chu.pop(0)
 
-                                    chu_pho_bien = Counter(self.lich_su_chu).most_common(1)[0][0]
-                                    chu_tam = chu_pho_bien
-                                    tin_cay_tam = tin_cay_tinh_tam
+                                    dem_chu = Counter(self.lich_su_chu)
+                                    chu_pho_bien, so_lan = dem_chu.most_common(1)[0]
+                                    ty_le_ap_dao = so_lan / len(self.lich_su_chu)
+
+                                    if ty_le_ap_dao >= 0.85 and len(self.lich_su_chu) >= 12:
+                                        self.chu_chot_tinh_on_dinh = chu_pho_bien
+
+                                    chu_tam = self.chu_chot_tinh_on_dinh if self.chu_chot_tinh_on_dinh != "..." else chu_pho_bien
+                                    tin_cay_tam = tin_cay_tinh_raw
                                     nguon_tam = "TINH"
                                 else:
-                                    chu_tam = "?"
+                                    if len(self.lich_su_chu) > 0: self.lich_su_chu.pop(0)
+                                    if len(self.lich_su_chu) == 0: self.chu_chot_tinh_on_dinh = "..."
+
+                                    # Thay đổi ? thành ...
+                                    chu_tam = self.chu_chot_tinh_on_dinh if self.chu_chot_tinh_on_dinh != "..." else "..."
                                     nguon_tam = "..."
 
-                        # --- TRẠNG THÁI 2: ĐANG GHI HÌNH CỬ ĐỘNG ---
                         elif self.trang_thai == "DANG_REC":
                             self.frames_rec.append(dac_trung)
                             so_frame_da_ghi = len(self.frames_rec)
@@ -228,14 +242,13 @@ class BoXuLyNhanDienKetHop:
                             nguon_tam = f"REC: {so_frame_da_ghi}/{SO_FRAME_LSTM}"
 
                             if so_frame_da_ghi == SO_FRAME_LSTM:
-                                # CHỐT CHẶN 2: Kiểm tra tổng vận tốc
                                 tong_van_toc_45 = sum(sum(abs(v) for v in f[63:]) for f in self.frames_rec)
 
                                 if tong_van_toc_45 < (SO_FRAME_LSTM * NGUONG_CHUYEN_DONG * 0.8):
                                     self.trang_thai = "TINH"
                                     self.frames_rec = []
-                                    chu_tam = chu_tinh_tam
-                                    tin_cay_tam = tin_cay_tinh_tam
+                                    chu_tam = self.chu_chot_tinh_on_dinh if self.chu_chot_tinh_on_dinh != "..." else chu_tinh_raw
+                                    tin_cay_tam = tin_cay_tinh_raw
                                     nguon_tam = "TINH (HỦY ĐỘNG)"
                                 else:
                                     if self.model_dong is not None:
@@ -258,7 +271,9 @@ class BoXuLyNhanDienKetHop:
                                         else:
                                             self.trang_thai = "TINH"
                                             self.frames_rec = []
-                                            chu_tam = "?"
+
+                                            # Đổi ? thành ...
+                                            chu_tam = "..."
                                             nguon_tam = "HỦY"
                                     else:
                                         self.trang_thai = "TINH"
@@ -268,6 +283,7 @@ class BoXuLyNhanDienKetHop:
                     self.trang_thai = "TINH"
                     self.frames_rec = []
                     self.lich_su_chu = []
+                    self.chu_chot_tinh_on_dinh = "..."
                     chu_tam = "..."
                     tin_cay_tam = 0.0
                     nguon_tam = "..."
@@ -277,6 +293,7 @@ class BoXuLyNhanDienKetHop:
                     self.ket_qua_tin_cay = tin_cay_tam
                     self.ket_qua_nguon = nguon_tam
                     self.ket_qua_landmarks = landmarks_tam
+                    self.ket_qua_trang_thai = self.trang_thai
 
         except Exception:
             print("\n[LỖI SẬP LUỒNG HỆ THỐNG AI]")
@@ -291,12 +308,38 @@ class BoXuLyNhanDienKetHop:
             tin_cay = self.ket_qua_tin_cay
             nguon = self.ket_qua_nguon
             landmarks = self.ket_qua_landmarks
+            trang_thai = self.ket_qua_trang_thai
 
         if anh_mau is not None:
             frame = chen_anh_png_mo(frame, anh_mau, x=50, y=50, do_mo=0.6)
 
         if landmarks:
+            h, w, _ = frame.shape
+
+            lm = landmarks.landmark[8]
+            cx, cy = int(lm.x * w), int(lm.y * h)
+
+            if trang_thai == "DANG_REC":
+                self.trail_history.append((cx, cy))
+                mau_vet = (0, 165, 255)
+            elif trang_thai == "DONG_BANG":
+                mau_vet = (0, 255, 0)
+            else:
+                self.trail_history.append((cx, cy))
+                while len(self.trail_history) > 8:
+                    self.trail_history.popleft()
+                mau_vet = (200, 200, 200)
+
+            pts = list(self.trail_history)
+            for i in range(1, len(pts)):
+                cv2.line(frame, pts[i - 1], pts[i], mau_vet, 2, cv2.LINE_AA)
+
+            cv2.circle(frame, (cx, cy), 5, mau_vet, -1)
+            cv2.circle(frame, (cx, cy), 12, mau_vet, 1)
+
             self.mp_draw.draw_landmarks(frame, landmarks, self.mp_hands.HAND_CONNECTIONS)
+        else:
+            self.trail_history.clear()
 
         return frame, chu, tin_cay, nguon
 
