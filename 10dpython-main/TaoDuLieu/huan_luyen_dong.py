@@ -9,9 +9,9 @@ from sklearn.model_selection import train_test_split
 # ==========================================
 # CẤU HÌNH CƠ BẢN
 # ==========================================
-KY_HIEU_DONG = ['J', 'Z', 'NONE']  # Đừng quên thêm nhãn NONE để chống nhiễu nhé!
+KY_HIEU_DONG = ['J', 'Z', 'TEN' , 'TUOI' , 'XIN_CHAO' , 'CAM_ON' , 'XIN_LOI' , 'NONE']  # Đừng quên thêm nhãn NONE để chống nhiễu nhé!
 SO_FRAME = 45
-SO_TOA_DO = 126
+SO_TOA_DO = 252
 THU_MUC_DATA = 'dataset_dong'
 MODEL_DIR = 'KhoDuLieu'
 MODEL_FILE = os.path.join(MODEL_DIR, 'model_dong_pytorch.pth')

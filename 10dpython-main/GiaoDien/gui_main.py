@@ -1,3 +1,7 @@
+import warnings
+# "Bùa" chặn họng mọi cảnh báo rác từ thư viện Google Protobuf gây giật màn hình
+warnings.filterwarnings("ignore", category=UserWarning, message=".*SymbolDatabase.GetPrototype().*")
+
 import time
 import cv2
 import threading
@@ -71,7 +75,7 @@ class UngDungNhanDien(ctk.CTk):
 
         self.dinh_dang_giao_dien()
 
-        # Khởi tạo Logic
+        # Khởi tạo Logic AI Đa tầng
         self.engine = BoXuLyNhanDienKetHop() if BoXuLyNhanDienKetHop else None
         self.logic_hoc = QuanLyBaiHoc() if QuanLyBaiHoc else None
         self.logic_thuc_hanh = QuanLyThucHanhTuDo() if QuanLyThucHanhTuDo else None
@@ -163,10 +167,10 @@ class UngDungNhanDien(ctk.CTk):
         if self.camera_running:
             return
 
-        # Dọn dẹp luồng cũ triệt để trước khi mở
+        # Khóa chống kẹt: Luồng cũ phải chết hẳn mới được tạo luồng mới
         if self.camera_thread is not None and self.camera_thread.is_alive():
             self.camera_running = False
-            self.camera_thread.join()  # Đã gỡ bỏ timeout=1.0
+            self.camera_thread.join()
             self.camera_thread = None
 
         self.camera_running = True
@@ -216,6 +220,7 @@ class UngDungNhanDien(ctk.CTk):
             if ret:
                 frame = cv2.flip(frame, 1)
                 if self.engine:
+                    # AI trực tiếp can thiệp: Vẽ xương tay, trả về Chữ, Độ tin cậy và Nguồn (TĨNH/ĐỘNG)
                     frame_ve, chu, tin_cay, nguon = self.engine.xu_ly_frame(frame)
                 else:
                     frame_ve, chu, tin_cay, nguon = frame, "...", 0.0, "..."
@@ -229,15 +234,25 @@ class UngDungNhanDien(ctk.CTk):
     def cap_nhat_giao_dien(self):
         if self.camera_running and self.latest_frame is not None:
             try:
-                img = ctk.CTkImage(light_image=Image.fromarray(self.latest_frame), size=(640, 480))
+                # GÁN TRỰC TIẾP VÀO self ĐỂ TRÓI CHẶT BỨC ẢNH LẠI, CẤM PYTHON DỌN RÁC
+                self.anh_cam_neo_giu = ctk.CTkImage(
+                    light_image=Image.fromarray(self.latest_frame),
+                    size=(640, 480),
+                )
                 chu, tin_cay, nguon = self.latest_prediction
 
                 if self.trang_hien_tai == "Học Tập":
-                    self.panel_hoc_tap.cap_nhat_khung_hinh(img, chu, tin_cay)
+                    self.panel_hoc_tap.cap_nhat_khung_hinh(
+                        self.anh_cam_neo_giu, chu, tin_cay
+                    )
                 elif self.trang_hien_tai == "Thực Hành Tự Do":
-                    self.panel_thuc_hanh.cap_nhat_khung_hinh(img, chu, tin_cay, nguon)
+                    self.panel_thuc_hanh.cap_nhat_khung_hinh(
+                        self.anh_cam_neo_giu, chu, tin_cay, nguon
+                    )
                 elif self.trang_hien_tai == "Minigame":
-                    self.panel_tro_choi.cap_nhat_khung_hinh(img, chu, tin_cay, nguon)
+                    self.panel_tro_choi.cap_nhat_khung_hinh(
+                        self.anh_cam_neo_giu, chu, tin_cay, nguon
+                    )
             except Exception as e:
                 print(f"Lỗi Render UI: {e}")
 

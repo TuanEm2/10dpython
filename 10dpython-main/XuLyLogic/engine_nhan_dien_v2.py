@@ -16,17 +16,18 @@ MODEL_DONG_PATH = 'KhoDuLieu/model_dong_pytorch.pth'
 NHAN_DONG_PATH = 'KhoDuLieu/model_dong_labels.npy'
 
 SO_FRAME_LSTM = 45
-SO_TOA_DO = 126
-NGUONG_TIN_CAY_TINH = 0.60
-NGUONG_TIN_CAY_DONG = 0.85
-NGUONG_CHUYEN_DONG = 2.0  # Ngưỡng chuyển động (Đã tăng)
-THOI_GIAN_DONG_BANG = 1.5
+SO_TOA_DO_DONG = 252  # 126 tĩnh + 126 vận tốc
+SO_TOA_DO_TINH = 126  # 63 trái + 63 phải
+NGUONG_TIN_CAY_TINH = 0.55  # Hạ nhẹ để nhận diện các chữ khó như R, X, V mượt hơn
+NGUONG_TIN_CAY_DONG = 0.80
+NGUONG_DICH_CHUYEN_CO_TAY = 0.025  # Cổ tay phải tịnh tiến > 2.5% màn hình mới gọi là múa Động
+THOI_GIAN_DONG_BANG = 1.2
 
 
 class SignLanguageLSTM(nn.Module):
     def __init__(self, num_classes):
         super(SignLanguageLSTM, self).__init__()
-        self.lstm1 = nn.LSTM(126, 128, bidirectional=True, batch_first=True)
+        self.lstm1 = nn.LSTM(252, 128, bidirectional=True, batch_first=True)
         self.bn1 = nn.BatchNorm1d(256)
         self.dropout1 = nn.Dropout(0.3)
         self.lstm2 = nn.LSTM(256, 64, bidirectional=True, batch_first=True)
@@ -69,16 +70,81 @@ def chen_anh_png_mo(frame, anh_png, x, y, do_mo=0.5):
     return frame
 
 
-def trich_xuat_toa_do(hand_landmarks):
-    goc_x = hand_landmarks.landmark[0].x
-    goc_y = hand_landmarks.landmark[0].y
-    goc_z = hand_landmarks.landmark[0].z
+def trich_xuat_1_tay_chuan(hand_lm):
+    """Trích xuất 63 con số chuẩn hóa tuyệt đối của đúng 1 bàn tay"""
+    gx, gy, gz = hand_lm.landmark[0].x, hand_lm.landmark[0].y, hand_lm.landmark[0].z
     toa_do = []
-    for diem in hand_landmarks.landmark:
-        toa_do.extend([diem.x - goc_x, diem.y - goc_y, diem.z - goc_z])
-    max_val = max(abs(v) for v in toa_do)
-    if max_val == 0: max_val = 1.0
-    return [v / max_val for v in toa_do]
+    for p in hand_lm.landmark:
+        toa_do.extend([p.x - gx, p.y - gy, p.z - gz])
+    max_v = max(abs(v) for v in toa_do) if toa_do else 1.0
+    if max_v == 0: max_v = 1.0
+    return [v / max_v for v in toa_do]
+
+
+def sap_xep_ban_tay_khong_gian(multi_hand_landmarks, multi_handedness):
+    """
+    BỘ LỌC KHÔNG GIAN BỌC LÓT:
+    Sắp xếp tay chặt chẽ theo tọa độ X từ Trái sang Phải màn hình để chống lộn hộc tủ.
+    """
+    if not multi_hand_landmarks:
+        return [0.0] * 126, None
+
+    tays = []
+    for i, lm in enumerate(multi_hand_landmarks):
+        # Bỏ qua các bàn tay mờ ảo (tránh bóng ma)
+        if multi_handedness[i].classification[0].score < 0.55:
+            continue
+        tays.append({
+            "x_root": lm.landmark[0].x,
+            "y_root": lm.landmark[0].y,
+            "norm": trich_xuat_1_tay_chuan(lm)
+        })
+
+    # Sắp xếp theo trục X ngang màn hình
+    tays.sort(key=lambda item: item["x_root"])
+
+    tay_trai = [0.0] * 63
+    tay_phai = [0.0] * 63
+    co_tay_chinh = None
+
+    if len(tays) == 1:
+        t = tays[0]
+        co_tay_chinh = (t["x_root"], t["y_root"])
+        if t["x_root"] < 0.5:
+            tay_trai = t["norm"]
+        else:
+            tay_phai = t["norm"]
+    elif len(tays) >= 2:
+        t0, t1 = tays[0], tays[1]
+        tay_trai = t0["norm"]
+        tay_phai = t1["norm"]
+        co_tay_chinh = (t0["x_root"], t0["y_root"])  # Lấy tay trái làm mốc đo tịnh tiến
+
+    return tay_trai + tay_phai, co_tay_chinh
+
+
+def ve_khung_xuong_tay_custom(frame, ds_diem_pixel_mot_tay):
+    """Vẽ nét trắng sữa tinh tế miễn nhiễm với lỗi rác con trỏ C++"""
+    if not ds_diem_pixel_mot_tay or len(ds_diem_pixel_mot_tay) < 21:
+        return
+
+    KET_NOI_BONE = [
+        (0, 1), (1, 2), (2, 3), (3, 4),
+        (0, 5), (5, 6), (6, 7), (7, 8),
+        (5, 9), (9, 10), (10, 11), (11, 12),
+        (9, 13), (13, 14), (14, 15), (15, 16),
+        (13, 17), (17, 18), (18, 19), (19, 20),
+        (0, 17)
+    ]
+
+    for idx_a, idx_b in KET_NOI_BONE:
+        pt1 = ds_diem_pixel_mot_tay[idx_a]
+        pt2 = ds_diem_pixel_mot_tay[idx_b]
+        cv2.line(frame, pt1, pt2, (245, 245, 250), 2, cv2.LINE_AA)
+
+    for x, y in ds_diem_pixel_mot_tay:
+        cv2.circle(frame, (x, y), 4, (0, 0, 255), -1, cv2.LINE_AA)
+        cv2.circle(frame, (x, y), 6, (0, 0, 255), 1, cv2.LINE_AA)
 
 
 class BoXuLyNhanDienKetHop:
@@ -96,6 +162,7 @@ class BoXuLyNhanDienKetHop:
 
         self.trang_thai = "TINH"
         self.frames_rec = []
+        self.co_tay_truoc = None
         self.toa_do_frame_truoc = None
         self.thoi_diem_dong_bang = 0
         self.lich_su_chu = []
@@ -103,7 +170,7 @@ class BoXuLyNhanDienKetHop:
         self.ket_qua_chu = "..."
         self.ket_qua_tin_cay = 0.0
         self.ket_qua_nguon = "..."
-        self.ket_qua_landmarks = None
+        self.ket_qua_danh_sach_landmarks = []
 
         self.frame_to_process = None
         self.lock = threading.Lock()
@@ -113,26 +180,32 @@ class BoXuLyNhanDienKetHop:
         self.thread.start()
 
     def _ai_worker(self):
-        try:
-            if os.path.exists(self.model_tinh_path):
+        if os.path.exists(self.model_tinh_path):
+            try:
                 with open(self.model_tinh_path, 'rb') as f:
                     self.model_tinh = pickle.load(f)
+            except Exception:
+                self.model_tinh = None
 
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-            if os.path.exists(self.model_dong_path) and os.path.exists(self.nhan_dong_path):
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        if os.path.exists(self.model_dong_path) and os.path.exists(self.nhan_dong_path):
+            try:
                 self.nhan_dong = np.load(self.nhan_dong_path, allow_pickle=True).tolist()
                 self.model_dong = SignLanguageLSTM(num_classes=len(self.nhan_dong)).to(self.device)
                 self.model_dong.load_state_dict(torch.load(self.model_dong_path, map_location=self.device))
                 self.model_dong.eval()
+            except Exception:
+                self.model_dong = None
 
-            hands = self.mp_hands.Hands(
-                max_num_hands=1,
-                model_complexity=1,
-                min_detection_confidence=0.6,
-                min_tracking_confidence=0.6
-            )
+        hands = self.mp_hands.Hands(
+            max_num_hands=2,
+            model_complexity=1,
+            min_detection_confidence=0.65,
+            min_tracking_confidence=0.65
+        )
 
-            while self.is_running:
+        while self.is_running:
+            try:
                 frame_xu_ly = None
                 with self.lock:
                     if self.frame_to_process is not None:
@@ -151,9 +224,16 @@ class BoXuLyNhanDienKetHop:
                 chu_tam = self.ket_qua_chu
                 tin_cay_tam = self.ket_qua_tin_cay
                 nguon_tam = self.ket_qua_nguon
-                landmarks_tam = None
+                ds_diem_pixel_tam = []
 
                 thoi_gian_hien_tai = time.time()
+
+                # Trích xuất pixel thuần Python để vẽ mượt
+                if result.multi_hand_landmarks:
+                    h_img, w_img, _ = frame_xu_ly.shape
+                    for hand_lm in result.multi_hand_landmarks:
+                        mot_tay = [(int(lm.x * w_img), int(lm.y * h_img)) for lm in hand_lm.landmark]
+                        ds_diem_pixel_tam.append(mot_tay)
 
                 if self.trang_thai == "DONG_BANG":
                     if thoi_gian_hien_tai - self.thoi_diem_dong_bang > THOI_GIAN_DONG_BANG:
@@ -164,123 +244,141 @@ class BoXuLyNhanDienKetHop:
                         tin_cay_tam = 0.0
                         nguon_tam = "..."
                     else:
-                        if result.multi_hand_landmarks:
-                            landmarks_tam = result.multi_hand_landmarks[0]
                         with self.lock:
-                            self.ket_qua_landmarks = landmarks_tam
+                            self.ket_qua_danh_sach_landmarks = ds_diem_pixel_tam
                         continue
 
                 # --- QUY TRÌNH XỬ LÝ CHÍNH ---
                 if result.multi_hand_landmarks:
-                    landmarks_tam = result.multi_hand_landmarks[0]
-                    toa_do = trich_xuat_toa_do(landmarks_tam)
+                    toa_do_126, co_tay_hien_tai = sap_xep_ban_tay_khong_gian(result.multi_hand_landmarks,
+                                                                             result.multi_handedness)
 
-                    if len(toa_do) == 63:
-                        if self.toa_do_frame_truoc is None:
-                            van_toc = [0.0] * 63
-                        else:
-                            van_toc = [toa_do[i] - self.toa_do_frame_truoc[i] for i in range(63)]
+                    # BƯỚC 1: ĐO TỊNH TIẾN CỔ TAY (CHỐNG NHIỄU RÁC NGÓN TAY)
+                    dich_chuyen_co_tay = 0.0
+                    if co_tay_hien_tai is not None and self.co_tay_truoc is not None:
+                        dx = co_tay_hien_tai[0] - self.co_tay_truoc[0]
+                        dy = co_tay_hien_tai[1] - self.co_tay_truoc[1]
+                        dich_chuyen_co_tay = (dx ** 2 + dy ** 2) ** 0.5
 
-                        muc_do_chuyen_dong = sum(abs(v) for v in van_toc)
-                        dac_trung = toa_do + van_toc
-                        self.toa_do_frame_truoc = toa_do.copy()
+                    self.co_tay_truoc = co_tay_hien_tai
 
-                        # CHẠY TRƯỚC MODEL TĨNH ĐỂ XEM ĐỘ TIN CẬY
-                        chu_tinh_tam = "?"
-                        tin_cay_tinh_tam = 0.0
-                        if self.model_tinh is not None:
-                            xac_suat_tinh = self.model_tinh.predict_proba([toa_do])[0]
-                            vi_tri_tinh = xac_suat_tinh.argmax()
-                            tin_cay_tinh_tam = float(xac_suat_tinh[vi_tri_tinh])
-                            chu_tinh_tam = self.model_tinh.classes_[vi_tri_tinh]
+                    # BƯỚC 2: TÍNH VECTOR ĐẶC TRƯNG 252 CHO PYTORCH
+                    if self.toa_do_frame_truoc is None:
+                        van_toc_126 = [0.0] * 126
+                    else:
+                        van_toc_126 = [toa_do_126[i] - self.toa_do_frame_truoc[i] for i in range(126)]
 
-                        # --- TRẠNG THÁI 1: TĨNH ---
-                        if self.trang_thai == "TINH":
-                            # CƠ CHẾ KHÓA TĨNH
-                            nguong_thuc_te = NGUONG_CHUYEN_DONG * 3.0 if tin_cay_tinh_tam > 0.80 else NGUONG_CHUYEN_DONG
+                    dac_trung_252 = toa_do_126 + van_toc_126
+                    self.toa_do_frame_truoc = toa_do_126.copy()
 
-                            if muc_do_chuyen_dong > nguong_thuc_te:
-                                self.trang_thai = "DANG_REC"
-                                self.frames_rec = [dac_trung]
-                                chu_tam = "..."
-                                nguon_tam = "REC: 1"
-                                tin_cay_tam = 0.0
+                    # BƯỚC 3: SIÊU THUẬT TOÁN BÓI 2 HỘC TỦ (CHỐNG LỆCH TAY)
+                    chu_tinh_tam = "?"
+                    tin_cay_tinh_tam = 0.0
+                    if self.model_tinh is not None and any(v != 0.0 for v in toa_do_126):
+                        try:
+                            # Tách hộc Trái và hộc Phải ra
+                            t_trai = toa_do_126[:63]
+                            t_phai = toa_do_126[63:]
+
+                            # Thử cả 2 phương án: Gốc và Đảo hộc
+                            pa1 = toa_do_126
+                            pa2 = t_phai + t_trai
+
+                            prob1 = self.model_tinh.predict_proba([pa1])[0]
+                            prob2 = self.model_tinh.predict_proba([pa2])[0]
+
+                            idx1, idx2 = prob1.argmax(), prob2.argmax()
+                            max1, max2 = prob1[idx1], prob2[idx2]
+
+                            if max1 >= max2:
+                                tin_cay_tinh_tam = float(max1)
+                                chu_tinh_tam = self.model_tinh.classes_[idx1]
                             else:
-                                if tin_cay_tinh_tam >= NGUONG_TIN_CAY_TINH:
-                                    self.lich_su_chu.append(chu_tinh_tam)
-                                    if len(self.lich_su_chu) > 10:
-                                        self.lich_su_chu.pop(0)
+                                tin_cay_tinh_tam = float(max2)
+                                chu_tinh_tam = self.model_tinh.classes_[idx2]
+                        except ValueError:
+                            chu_tinh_tam = "[Sai Cột Tĩnh]"
 
-                                    chu_pho_bien = Counter(self.lich_su_chu).most_common(1)[0][0]
-                                    chu_tam = chu_pho_bien
-                                    tin_cay_tam = tin_cay_tinh_tam
-                                    nguon_tam = "TINH"
-                                else:
-                                    chu_tam = "?"
-                                    nguon_tam = "..."
-
-                        # --- TRẠNG THÁI 2: ĐANG GHI HÌNH CỬ ĐỘNG ---
-                        elif self.trang_thai == "DANG_REC":
-                            self.frames_rec.append(dac_trung)
-                            so_frame_da_ghi = len(self.frames_rec)
+                    # --- PHÂN NHÁNH TRẠNG THÁI ---
+                    if self.trang_thai == "TINH":
+                        # Chỉ kích hoạt REC khi Cổ tay di chuyển một quãng đủ dài across the camera
+                        if dich_chuyen_co_tay > NGUONG_DICH_CHUYEN_CO_TAY:
+                            self.trang_thai = "DANG_REC"
+                            self.frames_rec = [dac_trung_252]
                             chu_tam = "..."
+                            nguon_tam = "REC: 1"
                             tin_cay_tam = 0.0
-                            nguon_tam = f"REC: {so_frame_da_ghi}/{SO_FRAME_LSTM}"
+                        else:
+                            if tin_cay_tinh_tam >= NGUONG_TIN_CAY_TINH:
+                                self.lich_su_chu.append(chu_tinh_tam)
+                                if len(self.lich_su_chu) > 7: self.lich_su_chu.pop(0)
+                                chu_tam = Counter(self.lich_su_chu).most_common(1)[0][0]
+                                tin_cay_tam = tin_cay_tinh_tam
+                                nguon_tam = "TINH"
+                            else:
+                                chu_tam = "?"
+                                nguon_tam = "..."
 
-                            if so_frame_da_ghi == SO_FRAME_LSTM:
-                                # CHỐT CHẶN 2: Kiểm tra tổng vận tốc
-                                tong_van_toc_45 = sum(sum(abs(v) for v in f[63:]) for f in self.frames_rec)
+                    elif self.trang_thai == "DANG_REC":
+                        self.frames_rec.append(dac_trung_252)
+                        so_frame_da_ghi = len(self.frames_rec)
+                        chu_tam = "..."
+                        tin_cay_tam = 0.0
+                        nguon_tam = f"REC: {so_frame_da_ghi}/{SO_FRAME_LSTM}"
 
-                                if tong_van_toc_45 < (SO_FRAME_LSTM * NGUONG_CHUYEN_DONG * 0.8):
-                                    self.trang_thai = "TINH"
-                                    self.frames_rec = []
-                                    chu_tam = chu_tinh_tam
-                                    tin_cay_tam = tin_cay_tinh_tam
-                                    nguon_tam = "TINH (HỦY ĐỘNG)"
-                                else:
-                                    if self.model_dong is not None:
-                                        X_tensor = torch.tensor([self.frames_rec], dtype=torch.float32).to(self.device)
-                                        with torch.no_grad():
-                                            outputs = self.model_dong(X_tensor)
-                                            xac_suat_dong = torch.softmax(outputs, dim=1).cpu().numpy()[0]
+                        if so_frame_da_ghi == SO_FRAME_LSTM:
+                            if self.model_dong is not None:
+                                try:
+                                    X_tensor = torch.tensor([self.frames_rec], dtype=torch.float32).to(self.device)
+                                    with torch.no_grad():
+                                        outputs = self.model_dong(X_tensor)
+                                        xac_suat_dong = torch.softmax(outputs, dim=1).cpu().numpy()[0]
 
-                                        vi_tri_dong = xac_suat_dong.argmax()
-                                        tin_cay_dong = float(xac_suat_dong[vi_tri_dong])
-                                        nhan_du_doan = self.nhan_dong[vi_tri_dong]
+                                    vi_tri_dong = xac_suat_dong.argmax()
+                                    tin_cay_dong = float(xac_suat_dong[vi_tri_dong])
+                                    nhan_du_doan = self.nhan_dong[vi_tri_dong]
 
-                                        if tin_cay_dong >= NGUONG_TIN_CAY_DONG and nhan_du_doan != "NONE":
-                                            chu_tam = nhan_du_doan
-                                            tin_cay_tam = tin_cay_dong
-                                            nguon_tam = "DONG"
-
-                                            self.trang_thai = "DONG_BANG"
-                                            self.thoi_diem_dong_bang = time.time()
-                                        else:
-                                            self.trang_thai = "TINH"
-                                            self.frames_rec = []
-                                            chu_tam = "?"
-                                            nguon_tam = "HỦY"
+                                    # CHỈ KHÓA KHI TỰ TIN VÀ KHÔNG PHẢI LÀ NHẪN 'NONE'
+                                    if tin_cay_dong >= NGUONG_TIN_CAY_DONG and nhan_du_doan.upper() not in ["NONE", "",
+                                                                                                            "NONE_"]:
+                                        chu_tam = nhan_du_doan
+                                        tin_cay_tam = tin_cay_dong
+                                        nguon_tam = "DONG"
+                                        self.trang_thai = "DONG_BANG"
+                                        self.thoi_diem_dong_bang = time.time()
                                     else:
+                                        # HỦY KẾT QUẢ RÁC: Trả lại quyền chấm điểm Tĩnh ngay lập tức!
                                         self.trang_thai = "TINH"
                                         self.frames_rec = []
+                                        chu_tam = chu_tinh_tam
+                                        tin_cay_tam = tin_cay_tinh_tam
+                                        nguon_tam = "TINH (Drop REC)"
+                                except Exception:
+                                    self.trang_thai = "TINH";
+                                    self.frames_rec = []
+                            else:
+                                self.trang_thai = "TINH";
+                                self.frames_rec = []
                 else:
+                    self.co_tay_truoc = None;
                     self.toa_do_frame_truoc = None
-                    self.trang_thai = "TINH"
-                    self.frames_rec = []
+                    self.trang_thai = "TINH";
+                    self.frames_rec = [];
                     self.lich_su_chu = []
-                    chu_tam = "..."
-                    tin_cay_tam = 0.0
+                    chu_tam = "...";
+                    tin_cay_tam = 0.0;
                     nguon_tam = "..."
+                    ds_diem_pixel_tam = []
 
                 with self.lock:
                     self.ket_qua_chu = chu_tam
                     self.ket_qua_tin_cay = tin_cay_tam
                     self.ket_qua_nguon = nguon_tam
-                    self.ket_qua_landmarks = landmarks_tam
+                    self.ket_qua_danh_sach_landmarks = ds_diem_pixel_tam
 
-        except Exception:
-            print("\n[LỖI SẬP LUỒNG HỆ THỐNG AI]")
-            traceback.print_exc()
+            except Exception as e:
+                print(f"[AI Worker] Nuốt 1 frame rác: {e}")
+                time.sleep(0.01)
 
     def xu_ly_frame(self, frame, anh_mau=None):
         with self.lock:
@@ -290,13 +388,14 @@ class BoXuLyNhanDienKetHop:
             chu = self.ket_qua_chu
             tin_cay = self.ket_qua_tin_cay
             nguon = self.ket_qua_nguon
-            landmarks = self.ket_qua_landmarks
+            danh_sach_tay = self.ket_qua_danh_sach_landmarks
 
         if anh_mau is not None:
             frame = chen_anh_png_mo(frame, anh_mau, x=50, y=50, do_mo=0.6)
 
-        if landmarks:
-            self.mp_draw.draw_landmarks(frame, landmarks, self.mp_hands.HAND_CONNECTIONS)
+        if danh_sach_tay:
+            for mot_tay in danh_sach_tay:
+                ve_khung_xuong_tay_custom(frame, mot_tay)
 
         return frame, chu, tin_cay, nguon
 
