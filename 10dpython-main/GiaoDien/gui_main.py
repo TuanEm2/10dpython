@@ -1,62 +1,55 @@
+import os
+import sys
 import warnings
-# "Bùa" chặn họng mọi cảnh báo rác từ thư viện Google Protobuf gây giật màn hình
-warnings.filterwarnings("ignore", category=UserWarning, message=".*SymbolDatabase.GetPrototype().*")
 
+# Khử toàn bộ dải rác đỏ Protobuf của Google
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+warnings.filterwarnings("ignore", category=UserWarning)
+
+import threading
 import time
 import cv2
-import threading
 import customtkinter as ctk
 from PIL import Image
 
-# ====================================================================
-# BỘ IMPORT TÁCH BIỆT (CHỐNG LỖI DOMINO KHI TÁCH FILE)
-# ====================================================================
-# 1. Tầng Logic
 try:
     from XuLyLogic.logic_bai_hoc import QuanLyBaiHoc
-except Exception as e:
-    print(f"Lỗi load Học Tập: {e}"); QuanLyBaiHoc = None
-
+except Exception:
+    QuanLyBaiHoc = None
 try:
     from XuLyLogic.logic_thuc_hanh_tu_do import QuanLyThucHanhTuDo
-except Exception as e:
-    print(f"Lỗi load Thực Hành: {e}"); QuanLyThucHanhTuDo = None
-
+except Exception:
+    QuanLyThucHanhTuDo = None
 try:
     from XuLyLogic.logic_ho_so import QuanLyHoSo
-except Exception as e:
-    print(f"Lỗi load Hồ Sơ: {e}"); QuanLyHoSo = None
-
+except Exception:
+    QuanLyHoSo = None
 try:
     from XuLyLogic.logic_tro_choi import QuanLyTroChoi
-except Exception as e:
-    print(f"Lỗi load Trò Chơi: {e}"); QuanLyTroChoi = None
-
+except Exception:
+    QuanLyTroChoi = None
 try:
     from XuLyLogic.engine_nhan_dien_v2 import BoXuLyNhanDienKetHop
-except Exception as e:
-    print(f"Lỗi load AI: {e}"); BoXuLyNhanDienKetHop = None
+except Exception:
+    BoXuLyNhanDienKetHop = None
 
-# 2. Tầng Giao Diện (Panels)
 try:
     from GiaoDien.panel_hoc_tap import PanelHocTap
-except Exception as e:
-    print(f"Lỗi load Panel Học Tập: {e}"); PanelHocTap = ctk.CTkFrame
-
+except Exception:
+    PanelHocTap = ctk.CTkFrame
 try:
     from GiaoDien.panel_thuc_hanh import PanelThucHanh
-except Exception as e:
-    print(f"Lỗi load Panel Thực Hành: {e}"); PanelThucHanh = ctk.CTkFrame
-
+except Exception:
+    PanelThucHanh = ctk.CTkFrame
 try:
     from GiaoDien.panel_tro_choi import PanelTroChoi
-except Exception as e:
-    print(f"Lỗi load Panel Trò Chơi: {e}"); PanelTroChoi = ctk.CTkFrame
-
+except Exception:
+    PanelTroChoi = ctk.CTkFrame
 try:
     from GiaoDien.panel_ho_so import PanelHoSo
-except Exception as e:
-    print(f"Lỗi load Panel Hồ Sơ: {e}"); PanelHoSo = ctk.CTkFrame
+except Exception:
+    PanelHoSo = ctk.CTkFrame
 
 
 class UngDungNhanDien(ctk.CTk):
@@ -66,19 +59,23 @@ class UngDungNhanDien(ctk.CTk):
         self.geometry("1300x800")
         self.minsize(1100, 700)
 
-        # Biến trạng thái hệ thống
+        # --- KIẾN TRÚC "LUỒNG BẤT TỬ" GIẢI QUYẾT 100% DEADLOCK USB ---
         self.camera_running = False
-        self.camera_thread = None
+        self.app_is_alive = True
+        self.cam_wake_event = threading.Event()  # "Công tắc" gọi luồng cam dậy
+
+        self.cam_session_id = 0
         self.latest_frame = None
         self.latest_prediction = ("...", 0.0, "...")
         self.cam_start_time = None
 
         self.dinh_dang_giao_dien()
 
-        # Khởi tạo Logic AI Đa tầng
         self.engine = BoXuLyNhanDienKetHop() if BoXuLyNhanDienKetHop else None
         self.logic_hoc = QuanLyBaiHoc() if QuanLyBaiHoc else None
-        self.logic_thuc_hanh = QuanLyThucHanhTuDo() if QuanLyThucHanhTuDo else None
+        self.logic_thuc_hanh = (
+            QuanLyThucHanhTuDo() if QuanLyThucHanhTuDo else None
+        )
         self.logic_ho_so = QuanLyHoSo() if QuanLyHoSo else None
         self.logic_game = QuanLyTroChoi() if QuanLyTroChoi else None
 
@@ -88,11 +85,12 @@ class UngDungNhanDien(ctk.CTk):
         self.ve_menu_sidebar()
 
         self.khung_chinh = ctk.CTkFrame(self, fg_color="transparent")
-        self.khung_chinh.grid(row=0, column=1, sticky="nsew", padx=(20, 20), pady=20)
+        self.khung_chinh.grid(
+            row=0, column=1, sticky="nsew", padx=(20, 20), pady=20
+        )
         self.khung_chinh.grid_rowconfigure(0, weight=1)
         self.khung_chinh.grid_columnconfigure(0, weight=1)
 
-        # Gắn các Component Giao Diện con vào Khung chính
         self.panel_hoc_tap = PanelHocTap(self.khung_chinh, main_app=self)
         self.panel_thuc_hanh = PanelThucHanh(self.khung_chinh, main_app=self)
         self.panel_tro_choi = PanelTroChoi(self.khung_chinh, main_app=self)
@@ -100,7 +98,114 @@ class UngDungNhanDien(ctk.CTk):
 
         self.trang_hien_tai = "Học Tập"
         self.hien_thi_trang("Học Tập")
+
+        # KHỞI ĐỘNG LUỒNG BẤT TỬ ĐÚNG 1 LẦN DUY NHẤT
+        self.eternal_thread = threading.Thread(
+            target=self._vong_lap_phan_cung_bat_tu, daemon=True
+        )
+        self.eternal_thread.start()
+
         self.protocol("WM_DELETE_WINDOW", self.dong_ung_dung)
+
+    def _vong_lap_phan_cung_bat_tu(self):
+        """Sống cùng tuổi thọ App. Chỉ mở USB khi Event bật, xả sạch USB khi Event tắt"""
+        while self.app_is_alive:
+            # Luồng hoàn toàn đóng băng tại đây (0% CPU) cho đến khi bấm Bật Cam
+            self.cam_wake_event.wait()
+            if not self.app_is_alive:
+                break
+
+            # Bắt đầu chiếm quyền USB
+            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            if not cap.isOpened():
+                cap = cv2.VideoCapture(0)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+            while self.camera_running and cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    time.sleep(0.01)
+                    continue
+
+                frame = cv2.flip(frame, 1)
+                if self.engine:
+                    f_ve, chu, conf, src = self.engine.xu_ly_frame(frame)
+                else:
+                    f_ve, chu, conf, src = frame, "...", 0.0, "..."
+
+                self.latest_frame = cv2.cvtColor(f_ve, cv2.COLOR_BGR2RGB)
+                self.latest_prediction = (chu, conf, src)
+
+            # Người dùng bấm Tắt -> Xả USB sạch sẽ, lặp lại trạng thái ngủ đông wait()
+            if cap:
+                cap.release()
+            self.cam_wake_event.clear()
+
+    def bat_camera(self):
+        if self.camera_running:
+            return
+
+        self.camera_running = True
+        self.cam_session_id += 1
+        current_session = self.cam_session_id
+
+        self.latest_frame = None
+        self.cam_start_time = time.time()
+
+        # BẬT CÔNG TẮC ĐÁNH THỨC LUỒNG BẤT TỬ!
+        self.cam_wake_event.set()
+
+        self.after(20, lambda: self._roi_anh_len_ui(current_session))
+
+    def tat_camera(self):
+        self.camera_running = False  # Ra lệnh cho luồng bất tử tự xả cap.release()
+        self.cam_session_id += 1
+
+        if self.cam_start_time:
+            phut = (time.time() - self.cam_start_time) / 60.0
+            if self.logic_ho_so:
+                self.logic_ho_so.cap_nhat_thoi_gian_hoc(phut)
+            self.cam_start_time = None
+
+        self.latest_frame = None
+        if self.engine:
+            self.engine.reset_ket_qua()
+
+        try:
+            if hasattr(self.panel_hoc_tap, "reset_giao_dien"):
+                self.panel_hoc_tap.reset_giao_dien()
+            if hasattr(self.panel_thuc_hanh, "reset_giao_dien"):
+                self.panel_thuc_hanh.reset_giao_dien()
+            if hasattr(self.panel_tro_choi, "reset_giao_dien"):
+                self.panel_tro_choi.reset_giao_dien()
+        except Exception:
+            pass
+
+    def _roi_anh_len_ui(self, session_id):
+        if not self.camera_running or session_id != self.cam_session_id:
+            return
+
+        if self.latest_frame is not None:
+            try:
+                p_img = Image.fromarray(self.latest_frame)
+                img_ctk = ctk.CTkImage(light_image=p_img, size=(640, 480))
+                chu, conf, nguon = self.latest_prediction
+
+                if self.trang_hien_tai == "Học Tập":
+                    self.panel_hoc_tap.cap_nhat_khung_hinh(img_ctk, chu, conf)
+                elif self.trang_hien_tai == "Thực Hành Tự Do":
+                    self.panel_thuc_hanh.cap_nhat_khung_hinh(
+                        img_ctk, chu, conf, nguon
+                    )
+                elif self.trang_hien_tai == "Minigame":
+                    self.panel_tro_choi.cap_nhat_khung_hinh(
+                        img_ctk, chu, conf, nguon
+                    )
+            except Exception:
+                pass
+
+        if self.camera_running and session_id == self.cam_session_id:
+            self.after(20, lambda: self._roi_anh_len_ui(session_id))
 
     def dinh_dang_giao_dien(self):
         ctk.set_appearance_mode("dark")
@@ -111,6 +216,7 @@ class UngDungNhanDien(ctk.CTk):
         self.mau_hover = "#B80710"
         self.mau_thanh_cong = "#00FFCC"
         self.configure(fg_color=self.mau_nen)
+
         self.font_logo = ("Segoe UI Black", 28, "bold")
         self.font_menu = ("Segoe UI", 16, "bold")
         self.font_tieu_de_lon = ("Segoe UI", 28, "bold")
@@ -118,39 +224,47 @@ class UngDungNhanDien(ctk.CTk):
         self.font_chu = ("Segoe UI", 15)
         self.font_chu_dam = ("Segoe UI", 15, "bold")
 
-    def dong_ung_dung(self):
-        self.camera_running = False
-        if self.camera_thread and self.camera_thread.is_alive():
-            self.camera_thread.join(timeout=0.5)
-        self.destroy()
-
     def ve_menu_sidebar(self):
-        self.sidebar = ctk.CTkFrame(self, width=250, corner_radius=0, fg_color=self.mau_sidebar)
+        self.sidebar = ctk.CTkFrame(
+            self, width=250, corner_radius=0, fg_color=self.mau_sidebar
+        )
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_rowconfigure(6, weight=1)
-        ctk.CTkLabel(self.sidebar, text="SIGNLENS", font=self.font_logo, text_color=self.mau_chu_dao).grid(row=0,
-                                                                                                           column=0,
-                                                                                                           padx=20,
-                                                                                                           pady=(30,
-                                                                                                                 30))
+        ctk.CTkLabel(
+            self.sidebar,
+            text="SIGNLENS",
+            font=self.font_logo,
+            text_color=self.mau_chu_dao,
+        ).grid(row=0, column=0, padx=20, pady=(30, 30))
 
         self.nut_menu = {}
-        for i, ten in enumerate(["Học Tập", "Thực Hành Tự Do", "Minigame", "Hồ Sơ & Xếp Hạng"]):
-            btn = ctk.CTkButton(self.sidebar, text=ten, font=self.font_menu, fg_color="transparent",
-                                text_color="#A0A0A0", hover_color=self.mau_card, anchor="w",
-                                command=lambda m=ten: self.hien_thi_trang(m))
+        for i, ten in enumerate(
+            ["Học Tập", "Thực Hành Tự Do", "Minigame", "Hồ Sơ & Xếp Hạng"]
+        ):
+            btn = ctk.CTkButton(
+                self.sidebar,
+                text=ten,
+                font=self.font_menu,
+                fg_color="transparent",
+                text_color="#A0A0A0",
+                hover_color="#1A1A1A",
+                anchor="w",
+                command=lambda m=ten: self.hien_thi_trang(m),
+            )
             btn.grid(row=i + 1, column=0, padx=20, pady=10, sticky="ew")
             self.nut_menu[ten] = btn
 
     def hien_thi_trang(self, ten_trang):
-        if self.camera_running: self.tat_camera()
+        if self.camera_running:
+            self.tat_camera()
         self.trang_hien_tai = ten_trang
-
         for ten, nut in self.nut_menu.items():
-            nut.configure(fg_color=self.mau_card if ten == ten_trang else "transparent",
-                          text_color="white" if ten == ten_trang else "#A0A0A0")
-
-        for w in self.khung_chinh.winfo_children(): w.grid_forget()
+            nut.configure(
+                fg_color="#1A1A1A" if ten == ten_trang else "transparent",
+                text_color="white" if ten == ten_trang else "#A0A0A0",
+            )
+        for w in self.khung_chinh.winfo_children():
+            w.grid_forget()
 
         if ten_trang == "Học Tập":
             self.panel_hoc_tap.grid(row=0, column=0, sticky="nsew")
@@ -159,105 +273,17 @@ class UngDungNhanDien(ctk.CTk):
         elif ten_trang == "Minigame":
             self.panel_tro_choi.grid(row=0, column=0, sticky="nsew")
         elif ten_trang == "Hồ Sơ & Xếp Hạng":
-            if hasattr(self.panel_ho_so, 'cap_nhat_giao_dien'): self.panel_ho_so.cap_nhat_giao_dien()
+            if hasattr(self.panel_ho_so, "cap_nhat_giao_dien"):
+                self.panel_ho_so.cap_nhat_giao_dien()
             self.panel_ho_so.grid(row=0, column=0, sticky="nsew")
 
-    # ================= LUỒNG XỬ LÝ CAMERA TRUNG TÂM =================
-    def bat_camera(self):
-        if self.camera_running:
-            return
-
-        # Khóa chống kẹt: Luồng cũ phải chết hẳn mới được tạo luồng mới
-        if self.camera_thread is not None and self.camera_thread.is_alive():
-            self.camera_running = False
-            self.camera_thread.join()
-            self.camera_thread = None
-
-        self.camera_running = True
-        self.latest_frame = None
-        self.camera_thread = threading.Thread(target=self.luong_camera_ngam, daemon=True)
-        self.camera_thread.start()
-        self.cap_nhat_giao_dien()
-        self.cam_start_time = time.time()
-
-    def tat_camera(self):
-        if self.cam_start_time:
-            phut = (time.time() - self.cam_start_time) / 60.0
-            if self.logic_ho_so: self.logic_ho_so.cap_nhat_thoi_gian_hoc(phut)
-            self.cam_start_time = None
-
+    def dong_ung_dung(self):
+        self.app_is_alive = False
         self.camera_running = False
-
-        # Khóa chặn đứng đợi phần cứng camera tắt hẳn
-        if self.camera_thread and self.camera_thread.is_alive():
-            self.camera_thread.join()
-            self.camera_thread = None
-
-        self.latest_frame = None
-
-        try:
-            if hasattr(self, 'panel_hoc_tap') and self.panel_hoc_tap.winfo_exists():
-                self.panel_hoc_tap.reset_giao_dien()
-            if hasattr(self, 'panel_thuc_hanh') and self.panel_thuc_hanh.winfo_exists():
-                self.panel_thuc_hanh.reset_giao_dien()
-            if hasattr(self, 'panel_tro_choi') and self.panel_tro_choi.winfo_exists():
-                self.panel_tro_choi.reset_giao_dien()
-        except Exception as e:
-            print(f"Bỏ qua lỗi xóa UI: {e}")
-
-    def luong_camera_ngam(self):
-        # Ưu tiên DirectShow giúp nhả cổng nhanh, nếu thất bại lùi về mặc định
-        cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(1)
-
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
-        while self.camera_running and cap and cap.isOpened():
-            ret, frame = cap.read()
-            if ret:
-                frame = cv2.flip(frame, 1)
-                if self.engine:
-                    # AI trực tiếp can thiệp: Vẽ xương tay, trả về Chữ, Độ tin cậy và Nguồn (TĨNH/ĐỘNG)
-                    frame_ve, chu, tin_cay, nguon = self.engine.xu_ly_frame(frame)
-                else:
-                    frame_ve, chu, tin_cay, nguon = frame, "...", 0.0, "..."
-
-                self.latest_frame = cv2.cvtColor(frame_ve, cv2.COLOR_BGR2RGB)
-                self.latest_prediction = (chu, tin_cay, nguon)
-
-        if cap:
-            cap.release()
-
-    def cap_nhat_giao_dien(self):
-        if self.camera_running and self.latest_frame is not None:
-            try:
-                # GÁN TRỰC TIẾP VÀO self ĐỂ TRÓI CHẶT BỨC ẢNH LẠI, CẤM PYTHON DỌN RÁC
-                self.anh_cam_neo_giu = ctk.CTkImage(
-                    light_image=Image.fromarray(self.latest_frame),
-                    size=(640, 480),
-                )
-                chu, tin_cay, nguon = self.latest_prediction
-
-                if self.trang_hien_tai == "Học Tập":
-                    self.panel_hoc_tap.cap_nhat_khung_hinh(
-                        self.anh_cam_neo_giu, chu, tin_cay
-                    )
-                elif self.trang_hien_tai == "Thực Hành Tự Do":
-                    self.panel_thuc_hanh.cap_nhat_khung_hinh(
-                        self.anh_cam_neo_giu, chu, tin_cay, nguon
-                    )
-                elif self.trang_hien_tai == "Minigame":
-                    self.panel_tro_choi.cap_nhat_khung_hinh(
-                        self.anh_cam_neo_giu, chu, tin_cay, nguon
-                    )
-            except Exception as e:
-                print(f"Lỗi Render UI: {e}")
-
-        if self.camera_running:
-            self.after(20, self.cap_nhat_giao_dien)
+        self.cam_wake_event.set()  # Đánh thức để nó tự chui vào lệnh break
+        if hasattr(self, "eternal_thread") and self.eternal_thread.is_alive():
+            self.eternal_thread.join(timeout=0.5)
+        self.destroy()
 
 
 if __name__ == "__main__":

@@ -39,3 +39,26 @@ class QuanLyThucHanhTuDo:
     def xoa_toan_bo(self):
         self.cau_hoan_chinh = ""
         return self.cau_hoan_chinh
+
+    def hien_thi_cau_hoan_chinh_thong_minh(self, cau_hoan_chinh):
+        """Tự động co giãn cỡ font và gập dòng khi văn bản quá dài"""
+        noi_dung = str(cau_hoan_chinh).strip()
+        so_ky_tu = len(noi_dung)
+
+        # 1. Thuật toán bậc thang tính cỡ chữ dựa vào mật độ ký tự
+        if so_ky_tu <= 12:
+            co_chu = 32  # Khổng lồ, rõ nét cho các từ đơn
+        elif so_ky_tu <= 24:
+            co_chu = 24  # Vừa vặn cho một câu ngắn
+        elif so_ky_tu <= 42:
+            co_chu = 18  # Thu nhỏ gọn gàng cho câu dài
+        else:
+            co_chu = 14  # Kích thước siêu tiết kiệm diện tích
+
+        # 2. Cập nhật giao diện kèm "Khóa gập dòng" (wraplength)
+        # Giả sử chiều ngang của Card chứa text là 640px, ta bẻ dòng ở mốc 600px
+        self.lbl_ket_qua.configure(
+            text=noi_dung if noi_dung else "...",
+            font=("Segoe UI", co_chu, "bold"),
+            wraplength=600  # <--- CHÌA KHÓA VÀNG CHỐNG TRÀN VIỀN!
+        )

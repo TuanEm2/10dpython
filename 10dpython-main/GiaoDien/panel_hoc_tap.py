@@ -125,6 +125,7 @@ class PanelHocTap(ctk.CTkFrame):
 
     def cap_nhat_khung_hinh(self, img, chu, tin_cay):
         self.lbl_camera.configure(image=img, text="")
+        self.lbl_camera.image = img
         logic = self.main_app.logic_hoc
         if self.dang_kiem_tra:
             if getattr(self, 'loai_cau_hoi', 0) == 1 and getattr(self, 'muc_tieu_quiz', None):
