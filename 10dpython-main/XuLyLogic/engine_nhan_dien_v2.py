@@ -71,42 +71,42 @@ def chen_anh_png_mo(frame, anh_png, x, y, do_mo=0.5):
 
 
 # ============================================================================
-# 1. BỘ LỌC ĐIỂM ẢNH SIÊU MƯỢT (ONE-EURO VELOCITY LITE)
+# BỘ NHÚN DYNAMIC KALMAN: CHỐNG RUNG & TRỊ BỆNH ẢO GIÁC ĐOÁN MÒ
 # ============================================================================
-class OneEuroLandmarkStabilizer:
-    def __init__(self, slot_label):
-        self.slot_label = slot_label
-        self.prev_world_pts = None
+class DynamicLandmarkStabilizer:
+    def __init__(self):
+        self.prev_pts = None
 
     def lam_muot(self, hand_lm):
-        """Ổn định tuyệt đối: Tĩnh thì ghì chặt điểm ảnh, Động thì buông lỏng để bám sát"""
         curr_pts = np.array([[lm.x, lm.y, lm.z] for lm in hand_lm.landmark])
 
-        if self.prev_world_pts is None:
-            self.prev_world_pts = curr_pts.copy()
+        if self.prev_pts is None:
+            self.prev_pts = curr_pts.copy()
             return curr_pts
 
-        # Đo vận tốc búng tay của Cổ tay (khớp 0)
-        speed = np.linalg.norm(curr_pts[0][:2] - self.prev_world_pts[0][:2])
+        # Đo vận tốc búng tay của gốc Cổ tay
+        speed = np.linalg.norm(curr_pts[0][:2] - self.prev_pts[0][:2])
 
-        if speed > 0.12:  # Búng tay nhanh > 12% màn hình -> Cắt đứt trí nhớ cũ lập tức!
-            self.prev_world_pts = curr_pts.copy()
-            return curr_pts
+        # KỸ THUẬT: Động bám sát - Tĩnh ghì chặt
+        if speed > 0.08:
+            # Tay di chuyển nhanh (>8% màn hình) -> Bám sát 100% không trễ nhịp
+            alpha = 1.0
+        else:
+            # Tay đứng im pose chữ -> Hạ alpha xuống cực thấp để ghì chặt pixel, chống rung
+            alpha = np.clip(speed * 12.0, 0.03, 0.5)
 
-        # Hệ số nội suy alpha biến thiên theo vận tốc
-        alpha = np.clip(0.15 + (speed / 0.04) * 0.70, 0.15, 0.85)
-
-        smoothed = alpha * curr_pts + (1.0 - alpha) * self.prev_world_pts
-        self.prev_world_pts = smoothed.copy()
+        smoothed = alpha * curr_pts + (1.0 - alpha) * self.prev_pts
+        self.prev_pts = smoothed.copy()
         return smoothed
 
 
 def trich_xuat_toa_do_tu_matran(smoothed_pts):
+    """Trích xuất 63 cột float tương đối chuẩn mực cho Scikit-Learn"""
     centered = smoothed_pts - smoothed_pts[0]
     max_v = np.max(np.abs(centered))
     if max_v < 1e-5: max_v = 1.0
     norm = centered / max_v
-    return norm.flatten().tolist()  # Đúng 63 floats chuẩn Scikit-Learn
+    return norm.flatten().tolist()
 
 
 def get_finger_states_chuan(smoothed_pts):
@@ -150,12 +150,14 @@ def xu_ly_matran_2_tay_muot(multi_hand_landmarks, multi_handedness, dict_stabili
     for i, lm in enumerate(multi_hand_landmarks):
         score = multi_handedness[i].classification[0].score
         label = multi_handedness[i].classification[0].label
-        if score < 0.55: continue
+
+        # Lọc tay tự tin thấp để dập tắt ảo giác
+        if score < 0.65: continue
 
         if label not in dict_stabilizers:
-            dict_stabilizers[label] = OneEuroLandmarkStabilizer(label)
+            dict_stabilizers[label] = DynamicLandmarkStabilizer()
 
-        # BỐC QUA BỘ LỌC ĐIỂM ẢNH ONE-EURO
+        # Đưa qua Lõi chống rung Dynamic
         pts_3d_muot = dict_stabilizers[label].lam_muot(lm)
 
         tays_tho.append({
@@ -173,39 +175,41 @@ def xu_ly_matran_2_tay_muot(multi_hand_landmarks, multi_handedness, dict_stabili
     if len(tays_tho) == 1:
         t = tays_tho[0]
         co_tay_chinh, raw_muot_chinh = (t["x_root"], t["y_root"]), t["pts_3d"]
-        if t["x_root"] < 0.5:
-            tay_trai = t["norm"]
-        else:
+        if t["label"] == 'Left':
             tay_phai = t["norm"]
+        else:
+            tay_trai = t["norm"]
     elif len(tays_tho) >= 2:
         t0, t1 = tays_tho[0], tays_tho[1]
-        tay_trai, tay_phai = t0["norm"], t1["norm"]
         co_tay_chinh, raw_muot_chinh = (t0["x_root"], t0["y_root"]), t0["pts_3d"]
+        tay_trai, tay_phai = t0["norm"], t1["norm"]
 
     return tay_trai + tay_phai, co_tay_chinh, raw_muot_chinh, danh_sach_ve_hud
 
 
 # ============================================================================
-# 2. GIAO DIỆN "HUD ĐIỂM ẢNH RÕ RÀNG" (HIGH-DEF PRECISION)
+# BỘ KHUNG XƯƠNG CYBERNETIC (KHÔNG ROS BOX, CHỈ BÁM TAY TỐI GIẢN)
 # ============================================================================
-def ve_hud_diem_anh_sieu_net(frame, pts_3d):
+def ve_khung_xuong_sieu_bam(frame, pts_3d):
     h, w, _ = frame.shape
     pts_px = [(int(x * w), int(y * h)) for x, y, z in pts_3d]
 
     KET_NOI = [(0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8), (5, 9), (9, 10), (10, 11), (11, 12),
                (9, 13), (13, 14), (14, 15), (15, 16), (13, 17), (17, 18), (18, 19), (19, 20), (0, 17)]
 
-    # 1. Vẽ dải xương trắng tinh khiết
+    # 1. Dải xương trắng tinh khiết
     for a, b in KET_NOI:
-        cv2.line(frame, pts_px[a], pts_px[b], (240, 240, 255), 2, cv2.LINE_AA)
+        cv2.line(frame, pts_px[a], pts_px[b], (240, 240, 245), 2, cv2.LINE_AA)
 
-    # 2. Vẽ 21 điểm ảnh rõ rệt
+    # 2. Khớp ngón tay
     for i, pt in enumerate(pts_px):
-        if i in [4, 8, 12, 16, 20]:  # 5 ĐẦU NGÓN TAY -> Rực sáng Vàng Cam radar
-            cv2.circle(frame, pt, 6, (0, 210, 255), -1, cv2.LINE_AA)
-            cv2.circle(frame, pt, 9, (0, 210, 255), 1, cv2.LINE_AA)
-        else:
-            cv2.circle(frame, pt, 4, (0, 255, 120), -1, cv2.LINE_AA)  # Các khớp còn lại Xanh Lục Neon
+        if i in [4, 8, 12, 16, 20]:  # 5 Đầu ngón rực sáng Vàng Cam radar
+            cv2.circle(frame, pt, 5, (0, 200, 255), -1, cv2.LINE_AA)
+            cv2.circle(frame, pt, 8, (0, 200, 255), 1, cv2.LINE_AA)
+        elif i == 0:  # Gốc cổ tay to hơn
+            cv2.circle(frame, pt, 6, (255, 255, 255), -1, cv2.LINE_AA)
+        else:  # Khớp ngón tay Xanh Mint
+            cv2.circle(frame, pt, 4, (0, 230, 115), -1, cv2.LINE_AA)
 
 
 class BoXuLyNhanDienKetHop:
@@ -227,11 +231,14 @@ class BoXuLyNhanDienKetHop:
 
         self.dict_stabilizers = {}
 
-        # --- BỘ TÍCH LŨY FSM "CÓ BÙA THA THỨ" ---
         self.chu_dang_tich_luy = None
         self.so_frame_da_giu = 0
-        self.MOC_FRAME_CAN_GIU = 12
         self.bo_dem_tha_thu = 0
+
+        # Công tắc Turbo Game
+        self.che_do_turbo = False
+        self.moc_frame_can_giu = 12
+        self.thoi_gian_dong_bang = 1.2
 
         self.quy_dao_co_tay = deque(maxlen=5)
 
@@ -247,8 +254,17 @@ class BoXuLyNhanDienKetHop:
         self.thread = threading.Thread(target=self._ai_worker, daemon=True)
         self.thread.start()
 
+    def cai_dat_che_do_nhanh(self, bat=True):
+        with self.lock:
+            self.che_do_turbo = bat
+            if bat:
+                self.moc_frame_can_giu = 2
+                self.thoi_gian_dong_bang = 0.0
+            else:
+                self.moc_frame_can_giu = 12
+                self.thoi_gian_dong_bang = 1.2
+
     def reset_ket_qua(self):
-        """Tẩy sạch nợ nần khi bấm Tắt Cam"""
         with self.lock:
             self.ket_qua_chu = "..."
             self.ket_qua_tin_cay = 0.0
@@ -278,8 +294,13 @@ class BoXuLyNhanDienKetHop:
             except Exception:
                 self.model_dong = None
 
-        hands = self.mp_hands.Hands(max_num_hands=2, model_complexity=1, min_detection_confidence=0.6,
-                                    min_tracking_confidence=0.5)
+        # CHÌA KHÓA DIỆT ĐOÁN MÒ: Ép Tracking Confidence lên 0.75 để loại bỏ ảo giác
+        hands = self.mp_hands.Hands(
+            max_num_hands=2,
+            model_complexity=1,
+            min_detection_confidence=0.70,
+            min_tracking_confidence=0.75
+        )
 
         while self.is_running:
             try:
@@ -303,7 +324,7 @@ class BoXuLyNhanDienKetHop:
                 thoi_gian_hien_tai = time.time()
 
                 if self.trang_thai == "DONG_BANG":
-                    if thoi_gian_hien_tai - self.thoi_diem_dong_bang > THOI_GIAN_DONG_BANG:
+                    if thoi_gian_hien_tai - self.thoi_diem_dong_bang > self.thoi_gian_dong_bang:
                         self.trang_thai = "TINH";
                         self.frames_rec = []
                         self.chu_dang_tich_luy = None;
@@ -319,8 +340,8 @@ class BoXuLyNhanDienKetHop:
                         result.multi_hand_landmarks, result.multi_handedness, self.dict_stabilizers
                     )
 
-                    # Nướng trực tiếp HUD điểm ảnh rõ ràng lên frame
-                    for pts_3d in ds_ve_hud: ve_hud_diem_anh_sieu_net(frame_ve_san, pts_3d)
+                    # Vẽ BỘ XƯƠNG CYBERNETIC MƯỢT MÀ TRỰC TIẾP LÊN HÌNH
+                    for pts_3d in ds_ve_hud: ve_khung_xuong_sieu_bam(frame_ve_san, pts_3d)
 
                     dich_chuyen_co_tay = 0.0
                     if co_tay_hien_tai:
@@ -360,7 +381,7 @@ class BoXuLyNhanDienKetHop:
                             chu_thô = "[Sai Cột Tĩnh]"
 
                     if self.trang_thai == "TINH":
-                        if dich_chuyen_co_tay > 0.038:
+                        if not self.che_do_turbo and dich_chuyen_co_tay > 0.038:
                             self.trang_thai = "DANG_REC";
                             self.frames_rec = [dac_trung_252]
                             self.chu_dang_tich_luy = None;
@@ -377,9 +398,9 @@ class BoXuLyNhanDienKetHop:
                                     else:
                                         self.chu_dang_tich_luy, self.so_frame_da_giu, self.bo_dem_tha_thu = chu_thô, 1, 2
 
-                                phan_tram = min(100, int((self.so_frame_da_giu / self.MOC_FRAME_CAN_GIU) * 100))
+                                phan_tram = min(100, int((self.so_frame_da_giu / self.moc_frame_can_giu) * 100))
 
-                                if self.so_frame_da_giu < self.MOC_FRAME_CAN_GIU:
+                                if self.so_frame_da_giu < self.moc_frame_can_giu:
                                     chu_tam, tin_cay_tam, nguon_tam = self.chu_dang_tich_luy, 0.50, f"HOLDING... [{phan_tram}%]"
                                 else:
                                     chu_tam, tin_cay_tam, nguon_tam = self.chu_dang_tich_luy, 1.0, "🎉 ĐÃ CHỐT ĐÁP ÁN!"

@@ -28,10 +28,12 @@ class QuanLyTroChoi:
 
         self.dang_delay = False
         self.thoi_diem_delay = 0
-        self.thoi_gian_cho = 1.2
+
+        # --- BỘ TĂNG TỐC TRÒ CHƠI (TURBO LOGIC) ---
+        self.thoi_gian_cho = 0.4  # Giảm từ 1.2s -> 0.4s: Xong 1 câu là nhảy câu mới ngay lập tức
+        self.delay_giua_chu = 0.0  # Giảm từ 0.5s -> 0.0s: Không có bất kỳ độ trễ nào giữa các chữ trong chuỗi!
 
         self.thoi_diem_chuyen_chu = 0
-        self.delay_giua_chu = 0.5
 
     def _tai_danh_sach_tu_kho(self):
         ngan_hang = []
@@ -67,6 +69,7 @@ class QuanLyTroChoi:
         self.chuoi_muc_tieu = []
         for _ in range(do_dai):
             chu_moi = random.choice(self.danh_sach_cau_hoi)
+            # Khóa chống trùng lặp chữ liên tiếp
             while len(self.chuoi_muc_tieu) > 0 and chu_moi == self.chuoi_muc_tieu[-1]:
                 chu_moi = random.choice(self.danh_sach_cau_hoi)
             self.chuoi_muc_tieu.append(chu_moi)
@@ -124,7 +127,10 @@ class QuanLyTroChoi:
             return "DANG_CHOI", chuoi_ui, self.so_tim, self.diem_so, thoi_gian_con, self.combo, self.cap_do
 
         chu_muc_tieu = self.chuoi_muc_tieu[self.vi_tri_chuoi]
-        if chu_ai_doan == chu_muc_tieu and do_tin_cay >= 0.60:
+
+        # --- CẢI TIẾN: HẠ NGƯỠNG ĐỂ BẮT ĐIỂM CỰC NHẠY ---
+        # Ngay khi AI chớp trúng đáp án với độ tự tin > 50%, Game chộp lấy ngay lập tức!
+        if chu_ai_doan == chu_muc_tieu and do_tin_cay >= 0.50:
             self.vi_tri_chuoi += 1
             self.thoi_diem_chuyen_chu = time.time()
 

@@ -1,5 +1,7 @@
 import time
 import customtkinter as ctk
+# Import hàm gọi API đã chuẩn bị trước đó
+from XuLyLogic.logic_mo_rong_api import goi_api_mo_rong_cau
 
 
 class PanelThucHanh(ctk.CTkFrame):
@@ -50,6 +52,8 @@ class PanelThucHanh(ctk.CTkFrame):
 
         ctk.CTkLabel(khung_duoi, text="📝 Câu hoàn chỉnh:", font=self.main_app.font_tieu_de).pack(anchor="w", padx=20,
                                                                                                  pady=(15, 5))
+
+        # ĐÂY LÀ NHÃN HIỂN THỊ CÂU HOÀN CHỈNH
         self.lbl_cau_hoan_chinh = ctk.CTkLabel(khung_duoi, text="", font=("Segoe UI", 28, "bold"), text_color="#00E676",
                                                fg_color="#1E1E1E", corner_radius=10, height=60, anchor="w")
         self.lbl_cau_hoan_chinh.pack(fill="x", padx=20, pady=10)
@@ -68,7 +72,7 @@ class PanelThucHanh(ctk.CTkFrame):
         khung_phai.grid(row=0, column=1, sticky="nsew")
 
         ctk.CTkLabel(khung_phai, text="AI ĐANG NHẬN DIỆN", font=self.main_app.font_tieu_de).pack(pady=(30, 10))
-        self.lbl_ket_qua = ctk.CTkLabel(khung_phai, text="...", font=("Segoe UI Black", 120, "bold"),
+        self.lbl_ket_qua = ctk.CTkLabel(khung_phai, text="...", font=("Segoe UI Black", 100, "bold"),
                                         text_color="#FFCC00")
         self.lbl_ket_qua.pack(pady=(40, 20), expand=True)
         self.lbl_tin_cay = ctk.CTkLabel(khung_phai, text="Đang chờ...", font=self.main_app.font_chu)
@@ -81,8 +85,18 @@ class PanelThucHanh(ctk.CTkFrame):
     def cap_nhat_khung_hinh(self, img, chu, tin_cay, nguon):
         self.lbl_camera.configure(image=img, text="")
         logic = self.main_app.logic_thuc_hanh
+
         if logic:
             chu_ht, tb, mau = logic.xu_ly_ket_qua(chu, tin_cay)
+
+            # --- MẸO LÀM ĐẸP CHỮ TRÊN RADAR LỚN ---
+            chu_radar = chu_ht.replace("_", " ") if chu_ht != "..." else "..."
+
+            # Co giãn font cho nhãn lớn (Tránh lỗi tràn viền như trong ảnh của bạn)
+            so_ky_tu = len(chu_radar)
+            co_chu = 100 if so_ky_tu <= 2 else (70 if so_ky_tu <= 6 else (50 if so_ky_tu <= 10 else 35))
+            self.lbl_ket_qua.configure(text=chu_radar, text_color=mau, font=("Segoe UI Black", co_chu, "bold"))
+
             if chu_ht != "...":
                 tb = f"{tb} | Engine: {nguon}"
                 if self.chu_cho_them != chu_ht:
@@ -95,7 +109,7 @@ class PanelThucHanh(ctk.CTkFrame):
                             self.thuc_hanh_them_khoang_trang()
                         else:
                             logic.chu_hien_tai = self.chu_cho_them
-                            self.thuc_hanh_them_chu()
+                            self.thuc_hanh_them_chu()  # Gọi hàm thêm chữ có bọc API
                         self.da_auto_add = True
                 self.thoi_diem_mat_tay = 0
             else:
@@ -110,28 +124,44 @@ class PanelThucHanh(ctk.CTkFrame):
                                 self.thuc_hanh_them_khoang_trang()
                             else:
                                 logic.chu_hien_tai = self.chu_cho_them
-                                self.thuc_hanh_them_chu()
+                                self.thuc_hanh_them_chu()  # Gọi hàm thêm chữ có bọc API
                             self.chu_cho_them = ""
                             self.thoi_diem_mat_tay = 0
 
-            self.lbl_ket_qua.configure(text=chu_ht, text_color=mau)
             self.lbl_tin_cay.configure(text=tb)
 
+    # ==============================================================
+    # HÀM THÊM CHỮ ĐƯỢC TÍCH HỢP TỰ ĐỘNG DỊCH API
+    # ==============================================================
     def thuc_hanh_them_chu(self):
-        if self.main_app.logic_thuc_hanh: self.lbl_cau_hoan_chinh.configure(
-            text=self.main_app.logic_thuc_hanh.them_chu_vao_cau())
+        if self.main_app.logic_thuc_hanh:
+            # 1. Gọi logic cũ để lấy câu đã được ghép thêm chữ mới
+            cau_tho = self.main_app.logic_thuc_hanh.them_chu_vao_cau()
+
+            # 2. Xóa các dấu gạch dưới nếu có (VD: TÔI XIN_CHAO -> TÔI XIN CHAO)
+            cau_tho_sach = cau_tho.replace("_", " ")
+
+            # 3. Bắn câu thô lên Server API để lấy câu dịch hoàn chỉnh
+            cau_hoan_chinh = goi_api_mo_rong_cau(cau_tho_sach)
+
+            # 4. Hiển thị câu đã dịch lên màn hình
+            self.lbl_cau_hoan_chinh.configure(text=cau_hoan_chinh)
 
     def thuc_hanh_them_khoang_trang(self):
-        if self.main_app.logic_thuc_hanh: self.lbl_cau_hoan_chinh.configure(
-            text=self.main_app.logic_thuc_hanh.them_khoang_trang())
+        if self.main_app.logic_thuc_hanh:
+            cau_tho = self.main_app.logic_thuc_hanh.them_khoang_trang()
+            self.lbl_cau_hoan_chinh.configure(text=goi_api_mo_rong_cau(cau_tho))
 
     def thuc_hanh_xoa_ky_tu(self):
-        if self.main_app.logic_thuc_hanh: self.lbl_cau_hoan_chinh.configure(
-            text=self.main_app.logic_thuc_hanh.xoa_ky_tu_cuoi())
+        if self.main_app.logic_thuc_hanh:
+            cau_tho = self.main_app.logic_thuc_hanh.xoa_ky_tu_cuoi()
+            # Xóa bớt chữ thì vẫn nên gọi API kiểm tra lại xem có trùng luật từ điển không
+            self.lbl_cau_hoan_chinh.configure(text=goi_api_mo_rong_cau(cau_tho))
 
     def thuc_hanh_xoa_het(self):
-        if self.main_app.logic_thuc_hanh: self.lbl_cau_hoan_chinh.configure(
-            text=self.main_app.logic_thuc_hanh.xoa_toan_bo())
+        if self.main_app.logic_thuc_hanh:
+            self.main_app.logic_thuc_hanh.xoa_toan_bo()
+            self.lbl_cau_hoan_chinh.configure(text="")
 
     def reset_giao_dien(self):
         self.lbl_camera.configure(image="", text="[ ĐANG TẮT CAMERA... ]")
